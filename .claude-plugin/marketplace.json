@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "agent-plugins",
+  "description": "Kim Birkelund's personal Claude Code plugins, installed from this repository's pushed commits.",
+  "owner": {
+    "name": "Kim Birkelund"
+  },
+  "plugins": [
+    {
+      "name": "planning",
+      "description": "Plan-driven workflow: capture a plan in its own git repository, execute it with a delegated team in a branch or worktree of its own, consume in-file markers, and archive the conversations that produced the work.",
+      "source": "./planning",
+      "category": "workflow"
+    }
+  ]
+}
