@@ -12,12 +12,12 @@ Capture what we have been discussing as a durable plan in the plans repository, 
 ## Procedure
 
 1. **Is there something to plan?** With no argument and a conversation that settled nothing, ask what to plan and stop there.
-2. **Locate the plan.** Run `pwsh -File ../../scripts/Get-PlanContext.ps1` (path relative to this skill's own directory) — always, not only when you suspect the session started below the repository root. An argument with no whitespace is passed as `-Plan` first — `selected` means refine that plan — while one containing whitespace is always what to plan, and is never matched. See _Where the plan lives_ below for what it returns and how to act on each case. Read the plan in full if there is one.
+2. **Locate the plan.** Run `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Get-PlanContext.ps1"` from the repository root, never from this skill's directory — always, not only when you suspect the session started below the repository root. An argument with no whitespace is passed as `-Plan` first — `selected` means refine that plan — while one containing whitespace is always what to plan, and is never matched. See _Where the plan lives_ below for what it returns and how to act on each case. Read the plan in full if there is one.
 3. **Branch on `Status:`** — see _Write or merge_ below.
 4. **Harvest every `∫∫...∫∫` marker**, before folding in anything from the conversation.
 5. **Scout**, but only for questions the conversation genuinely left open.
 6. **Decide `Team:`, `Parallel:`, `Checkpoints:` and `Verify:`**, then write or merge. Set `Status: PLANNING` and take `Updated:` from `date +%F` — run it, never write the date from memory.
-7. **Commit the plan** with `pwsh -File ../../scripts/Save-Plan.ps1`. Every write, without exception — see _Committing the plan_.
+7. **Commit the plan** with `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Save-Plan.ps1"`. Every write, without exception — see _Committing the plan_.
 8. **Surface it** if this call created the plan, or if the user asked to see it — see _Surfacing the plan_.
 9. **Report** — what changed in the plan, what is still open, and which execution choices you made and why. Your answer to a `∫∫...?∫∫` question belongs here in full.
 

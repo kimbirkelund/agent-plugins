@@ -32,7 +32,7 @@ you find the plan ─> provenance ─> gate ─> branch ─> per group: implemen
 
 ## First: find the plan
 
-Plans live in their own git repository, not in the working tree, so there is nothing beside the code to open. Run `pwsh -File ../../scripts/Get-PlanContext.ps1` and act on `PlanMatch`:
+Plans live in their own git repository, not in the working tree, so there is nothing beside the code to open. Run `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Get-PlanContext.ps1"` and act on `PlanMatch`:
 
 - **`branch`** — a plan's `Branch:` line is the checked-out branch. This is the resume case: you are in the worktree a previous run made.
 - **`only-active`** — one plan is `PLANNING` or `IMPLEMENTING` and no branch matched. The normal first run, on the default branch.
@@ -94,7 +94,7 @@ Branch in place:
 
 ## Every plan write is committed
 
-**After every write to the plan, run `pwsh -File ../../scripts/Save-Plan.ps1`.** Status changes, the `Branch:` and `Base:` lines, each progress note, the divergences you record at the end — all of them.
+**After every write to the plan, run `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Save-Plan.ps1"`.** Status changes, the `Branch:` and `Base:` lines, each progress note, the divergences you record at the end — all of them.
 
 Two consequences worth being explicit about.
 

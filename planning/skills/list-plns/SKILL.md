@@ -16,7 +16,7 @@ This is the read-only view over that directory. It changes nothing — not a sta
 
 ## Procedure
 
-1. **Run the script.** `pwsh -File ../../scripts/Get-PlanList.ps1` (path relative to this skill's own directory), adding `-All` when the user asked for everything. It prints one JSON object; read that and derive nothing yourself.
+1. **Run the script.** `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Get-PlanList.ps1"` from the repository root, never from this skill's directory, adding `-All` when the user asked for everything. It prints one JSON object; read that and derive nothing yourself.
 2. **Render it** as described below. Never dump the JSON.
 3. **Say what is hidden**, when `Total` is greater than `Listed`: how many spent plans were left out, and that `/list-plns all` includes them. One clause, not a paragraph.
 

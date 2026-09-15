@@ -42,7 +42,7 @@ Exit codes: `0` success, `1` plan named but not found, `2` unusable archive root
 
 ## Procedure
 
-1. **Find the plan, if there is one.** The argument if given; otherwise run `pwsh -File ../../scripts/Get-PlanContext.ps1` (path relative to this skill's own directory) and take `PlanPath`. `PlanMatch` of `ambiguous` means several plans could be meant — list them and ask rather than guessing. No plan at all is fine: archive the conversations without one and say that is what you did.
+1. **Find the plan, if there is one.** The argument if given; otherwise run `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Get-PlanContext.ps1"` from the repository root, never from this skill's directory, and take `PlanPath`. `PlanMatch` of `ambiguous` means several plans could be meant — list them and ask rather than guessing. No plan at all is fine: archive the conversations without one and say that is what you did.
 2. **Run the script**, with `-RepoPath` at the work tree the sessions ran in. The user invoking `/archive-sessions` is the go-ahead; a dry run first only costs them a round trip. Do it in the session that did the work when you can — that session's own transcript is then part of what gets copied.
 3. **Report** the archive folder, how many transcripts went in, and that the plan stayed where it is. Keep it to a couple of lines; the JSON is for you, not for them.
 
