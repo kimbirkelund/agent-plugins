@@ -19,6 +19,12 @@
     not started, and the plans in flight last. Within a group the oldest `Updated:` comes
     first, so the plan touched most recently is nearest the prompt.
 
+    Every unfinished plan carries the `Key` `Get-PlanContext.ps1` gave it — `A`, `B`, ...
+    `Z`, `AA` — the letter `/pln` and `/oimpl` take as a selector. The letters are not
+    assigned here: the context script hands them out in this same order, so the first
+    unfinished plan listed is `A` and the keys ascend down the listing. Spent plans have
+    none, and lead the listing when -All is passed, so `A` is not always the first line.
+
     Spent plans are excluded unless -All is passed. A plan whose `Status:` is neither
     PLANNING, IMPLEMENTING nor DONE is never hidden: an unreadable status is a problem to
     see, not a plan to filter away.
@@ -129,6 +135,10 @@ function Get-PlanGroup([string]$Status)
     }
 }
 
+# This rank must agree with the one Get-PlanContext.ps1 hands the keys out by, or the
+# letters would not ascend down the listing. It stays here because the context output
+# carries no rank to sort on — a spent plan has no key at all — and a test pins the two
+# orders together.
 function Get-GroupOrder([string]$Group)
 {
     switch ($Group)
@@ -159,6 +169,7 @@ foreach ($candidate in @($context.Candidates))
     $plans += [pscustomobject]@{
         Path          = $candidate.Path
         Name          = $candidate.Name
+        Key           = $candidate.Key
         Title         = $candidate.Title
         Status        = $candidate.Status
         Group         = $group

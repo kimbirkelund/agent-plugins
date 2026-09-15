@@ -58,7 +58,10 @@ BeforeAll {
 
         New-Item -ItemType Directory -Path $Fixture.PlanDir -Force | Out-Null;
 
-        $lines = @("# Plan: $Title", '', "Status: $Status", "Updated: $Updated");
+        $lines = @("# Plan: $Title", '', "Status: $Status");
+        # An empty -Updated writes no Updated: line at all, so a test can cover a plan that
+        # never got one — the one header field that crosses JSON as null.
+        if ($Updated) { $lines += "Updated: $Updated" }
         if ($Branch) { $lines += "Branch: $Branch" }
         $lines += @('', '## Goal', '', $Goal, '', '## Steps', '');
         for ($i = 1; $i -le $Steps; $i++) { $lines += "$i. do thing $i" }
@@ -199,6 +202,38 @@ Describe 'Get-PlanList' {
 
             @($result.Plans | ForEach-Object { $_.Name }) | Should -Be @('a.md', 'b.md');
         }
+
+        It 'lists the plans in the order the context script handed the keys out' {
+            $f = New-Fixture;
+            New-PlanFile $f -Name 'a-ongoing.md' -Status 'IMPLEMENTING' -Updated '2026-09-01';
+            New-PlanFile $f -Name 'b-done.md' -Status 'DONE' -Updated '2026-09-02';
+            New-PlanFile $f -Name 'c-planning.md' -Status 'PLANNING' -Updated '2026-09-03';
+            New-PlanFile $f -Name 'd-odd.md' -Status 'WAT' -Updated '2026-09-04';
+            # No Updated: line, so the field arrives from the context script as JSON null.
+            # Both sorts must still agree on where it goes: first within its own group, and
+            # its name would otherwise put it last among the not-started plans.
+            New-PlanFile $f -Name 'e-undated.md' -Status 'PLANNING' -Updated '';
+
+            $result = Invoke-List $f @{ All = $true };
+
+            @($result.Plans | ForEach-Object { $_.Name }) |
+                Should -Be @('b-done.md', 'd-odd.md', 'e-undated.md', 'c-planning.md', 'a-ongoing.md');
+            @($result.Plans | ForEach-Object { $_.Key }) | Should -Be @($null, 'A', 'B', 'C', 'D');
+        }
+
+        It 'keeps the letters ascending when spent plans are left out' {
+            $f = New-Fixture;
+            New-PlanFile $f -Name 'a-spent.md' -Status 'DONE' -Updated '2026-09-01';
+            New-PlanFile $f -Name 'b-early.md' -Status 'PLANNING' -Updated '2026-09-02';
+            New-PlanFile $f -Name 'c-late.md' -Status 'PLANNING' -Updated '2026-09-03';
+            New-PlanFile $f -Name 'd-running.md' -Status 'IMPLEMENTING' -Updated '2026-09-04';
+
+            $result = Invoke-List $f;
+
+            @($result.Plans | ForEach-Object { $_.Name }) |
+                Should -Be @('b-early.md', 'c-late.md', 'd-running.md');
+            @($result.Plans | ForEach-Object { $_.Key }) | Should -Be @('A', 'B', 'C');
+        }
     }
 
     Context 'per-plan detail' {
@@ -214,6 +249,14 @@ Describe 'Get-PlanList' {
             $plan.Group | Should -Be 'ongoing';
             $plan.Branch | Should -Be 'feat/parser';
             $plan.Updated | Should -Be '2026-09-07';
+            $plan.Key | Should -Be 'A';
+        }
+
+        It 'leaves a spent plan without a key' {
+            $f = New-Fixture;
+            New-PlanFile $f -Name 'spent.md' -Status 'DONE';
+
+            (Invoke-List $f @{ All = $true }).Plans[0].Key | Should -BeNullOrEmpty;
         }
 
         It 'takes the goal as one rewrapped paragraph' {
