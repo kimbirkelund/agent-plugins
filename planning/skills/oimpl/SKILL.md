@@ -19,7 +19,7 @@ It is deliberately not `/impl` with a flag. `/impl` may still create the branch 
 
 ## Procedure
 
-1. **Find the plan.** Run `pwsh -File ../../scripts/Get-PlanContext.ps1` (path relative to this skill's own directory). `PlanMatch` of `ambiguous` means several plans could be meant — list them with titles and statuses, ask which, and stop. `none` means there is nothing to open; send the user to `/pln`.
+1. **Find the plan.** With an argument, pass it as `-Plan` to `pwsh -File ../../scripts/Get-PlanContext.ps1` (path relative to this skill's own directory); with none, run it bare. `selected` means the argument named the plan unambiguously — continue with it. `ambiguous` means several plans could be meant — list `Matches`' titles and statuses when an argument was passed, `Candidates`' otherwise, ask which, and stop. `no-match` means the argument matched no plan — say so, and stop. `none` means there is nothing to open; send the user to `/pln`.
 2. **Pre-flight the plan** — see below. On any failure, **create nothing** and stop.
 3. **Get the worktree**, either from the plan's existing `Branch:` line or from the worktree hook — see _Making the worktree_.
 4. **Attach it to the plan**: write `Branch:` into the header block and commit with `pwsh -File ../../scripts/Save-Plan.ps1 -Message "plan: branch for <title>"`. Nothing else in the plan changes — `Status:` stays `PLANNING` and `Base:` stays unwritten, because the run has not started.
