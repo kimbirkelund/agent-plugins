@@ -1,7 +1,7 @@
 ---
 name: pln
 description: Create or update the plan for whatever is being discussed in the plans repository, then hold planning mode until /impl is run.
-argument-hint: "[what to plan — omit to plan what we've been discussing]"
+argument-hint: "[what to plan, or a plan letter/name from /list-plns to refine — omit to plan what we've been discussing]"
 disable-model-invocation: true
 ---
 
@@ -12,7 +12,7 @@ Capture what we have been discussing as a durable plan in the plans repository, 
 ## Procedure
 
 1. **Is there something to plan?** With no argument and a conversation that settled nothing, ask what to plan and stop there.
-2. **Locate the plan.** Run `pwsh -File ../../scripts/Get-PlanContext.ps1` (path relative to this skill's own directory) — always, not only when you suspect the session started below the repository root. See _Where the plan lives_ below for what it returns and how to act on each case. Read the plan in full if there is one.
+2. **Locate the plan.** Run `pwsh -File ../../scripts/Get-PlanContext.ps1` (path relative to this skill's own directory) — always, not only when you suspect the session started below the repository root. An argument with no whitespace is passed as `-Plan` first — `selected` means refine that plan — while one containing whitespace is always what to plan, and is never matched. See _Where the plan lives_ below for what it returns and how to act on each case. Read the plan in full if there is one.
 3. **Branch on `Status:`** — see _Write or merge_ below.
 4. **Harvest every `∫∫...∫∫` marker**, before folding in anything from the conversation.
 5. **Scout**, but only for questions the conversation genuinely left open.
@@ -40,10 +40,12 @@ Plans live in their own git repository, one directory per repository they are ab
 `Get-PlanContext.ps1` is the only thing that knows this layout — never derive a path yourself, and never guess at the plans repository's location. It prints one JSON object:
 
 - **`PlanPath`** — the current plan, or `null`. **`PlanMatch`** says how it was decided:
+  - `selected` — the argument named this plan, unambiguously; refine it, and the "Write or merge" rules apply by its `Status:`.
   - `branch` — a plan's `Branch:` line is the checked-out branch. Exact; this is the normal case once `/impl` has made a branch.
   - `only-active` — no `Branch:` matched, and exactly one plan is `PLANNING` or `IMPLEMENTING`. The normal case while planning on the default branch.
   - `ambiguous` — several plans could be meant. **Do not pick one.** List the candidates with their titles and statuses, ask which, and stop.
   - `none` — this repository has no plan yet, so you are writing the first one.
+  - `no-match` — the argument matched no plan; it is what to plan, exactly as today.
 - **`NewPlanPath`** — where a new plan goes. Only present when you pass `-Title "<the plan's title>"`, so pass it once you know the title and use what comes back verbatim. It is today's date plus a slug of the title, suffixed if that name is taken.
 - **`PlanDir`**, **`PlansRepo`**, **`RepoRoot`**, **`RepoName`**, **`Branch`** — the surrounding facts.
 - **`Surface`** and **`Worktree`** — the user's hooks, or absent. See _Surfacing the plan_; `Worktree` belongs to `/impl`.
