@@ -24,7 +24,9 @@ This is the read-only view over that directory. It changes nothing — not a sta
 
 ## What the script returns
 
-Per plan: `Path`, `Name`, `Title`, `Status`, `Group`, `Branch`, `Updated`, `IsCurrent`, `Goal` (the first paragraph of `## Goal`), `Steps`, `Markers` and `OpenQuestions`. Around them: `RepoName`, `PlanDir`, `CurrentPlan`, `Total` and `Listed`.
+Per plan: `Path`, `Name`, `Key`, `Title`, `Status`, `Group`, `Branch`, `Updated`, `IsCurrent`, `Goal` (the first paragraph of `## Goal`), `Steps`, `Markers` and `OpenQuestions`. Around them: `RepoName`, `PlanDir`, `CurrentPlan`, `Total` and `Listed`.
+
+`Key` is the letter `/pln` and `/oimpl` accept as a selector — `A`, `B`, ... in the order the plans are listed, `null` for a `DONE` plan. It comes from `Get-PlanContext.ps1`; do not recompute it.
 
 `Group` is the ordering the script already applied, and the grouping to render:
 
@@ -40,25 +42,32 @@ Per plan: `Path`, `Name`, `Title`, `Status`, `Group`, `Branch`, `Updated`, `IsCu
 One header line, then the groups in the order they came, each plan as a line with an indented goal beneath it:
 
 ```
-widget — 4 plans, 1 done hidden (`/list-plns all` to include)
+widget — 4 plans
+
+done
+     2026-07-14-legacy-migration — 5 steps · updated 2026-08-01
 
 not started
-  2026-09-04-retry-budget — 6 steps · 2 open questions · updated 2026-09-05
-      A per-caller retry budget, so one bad dependency cannot amplify load.
-  2026-09-08-drop-legacy-uploader — 4 steps · on drop-legacy-uploader · updated 2026-09-08
+  A  2026-09-04-retry-budget — 6 steps · 2 open questions · updated 2026-09-05
+     A per-caller retry budget, so one bad dependency cannot amplify load.
+  B  2026-09-08-drop-legacy-uploader — 4 steps · on drop-legacy-uploader · updated 2026-09-08
 
 ongoing
-  2026-09-10-parallel-uploads — on feat/parallel-uploads · 9 steps · updated 2026-09-10 ← current
-      Upload parts concurrently, capped per host, with one shared rate limit.
+  C  2026-09-10-parallel-uploads — on feat/parallel-uploads · 9 steps · updated 2026-09-10 ← current
+     Upload parts concurrently, capped per host, with one shared rate limit.
+
+/pln <letter> to refine one, /oimpl <letter> to open it
 ```
 
 Rules for that:
 
 - **The name without the `.md`** identifies the plan; the title is usually the same words and printing both is noise. Print the title instead when it says something the file name lost.
+- **The letter is the plan's `Key`**, padded to two characters plus one separating space ahead of the name — blank for a `DONE` plan, which has no `Key`. It is the argument `/pln` and `/oimpl` accept next.
 - **The short status is what the reader needs to decide whether to open it**: how many steps, the branch when there is one, the `Updated:` date, and anything blocking — `Markers` (unconsumed `∫∫...∫∫`) and `OpenQuestions` both stop `/impl`, so say when either is non-zero and stay quiet when both are zero.
 - **Mark the current plan** — the one whose `Path` is `CurrentPlan`, flagged as `IsCurrent`. That is the plan `/pln` and `/impl` act on with no argument, which is worth knowing before running either.
 - **The goal is one line, trimmed to what fits.** It is there so the name means something; it is not a summary of the plan.
 - **Drop a group with nothing in it** rather than printing an empty heading.
+- **Close with `/pln <letter> to refine one, /oimpl <letter> to open it`**, exactly, so the letters just printed have somewhere to go.
 - **Nothing at all** — say the repository has no plans and that `/pln` writes the first one. Do not list the plans of another repository to fill the space.
 
 ## What this skill does not do
