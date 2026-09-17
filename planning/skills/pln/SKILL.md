@@ -16,10 +16,11 @@ Capture what we have been discussing as a durable plan in the plans repository, 
 3. **Branch on `Status:`** — see _Write or merge_ below.
 4. **Harvest every `∫∫...∫∫` marker**, before folding in anything from the conversation.
 5. **Scout**, but only for questions the conversation genuinely left open.
-6. **Decide `Team:`, `Parallel:`, `Checkpoints:` and `Verify:`**, then write or merge. Set `Status: PLANNING` and take `Updated:` from `date +%F` — run it, never write the date from memory.
-7. **Commit the plan** with `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Save-Plan.ps1"`. Every write, without exception — see _Committing the plan_.
-8. **Surface it** if this call created the plan, or if the user asked to see it — see _Surfacing the plan_.
-9. **Report** — what changed in the plan, what is still open, and which execution choices you made and why. Your answer to a `∫∫...?∫∫` question belongs here in full.
+6. **One plan or several.** Apply `../pln/references/splitting.md`; when it says split, propose the parts in your reply before writing, and write one plan per part the user accepts. This includes merging into an existing plan — when what you are about to fold in makes that plan two pieces, propose carving it in two rather than growing it, and let the user decide.
+7. **Decide `Team:`, `Parallel:`, `Checkpoints:` and `Verify:`**, then write or merge. Set `Status: PLANNING` and take `Updated:` from `date +%F` — run it, never write the date from memory.
+8. **Commit the plan** with `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Save-Plan.ps1"`. Every write, without exception — see _Committing the plan_.
+9. **Surface it** if this call created the plan, or if the user asked to see it — see _Surfacing the plan_.
+10. **Report** — what changed in the plan, what is still open, and which execution choices you made and why. Your answer to a `∫∫...?∫∫` question belongs here in full.
 
 The rest of this file is why, and what each step involves.
 
@@ -99,6 +100,8 @@ Read any existing plan completely before touching it — merging means preservin
 - **`Status: PLANNING`, different work** — this is a second plan, not a merge. Say that the existing plan is about something else, and write the new work to a new `NewPlanPath` rather than folding two pieces of work into one incoherent plan. Both stay `PLANNING`, so say in your reply which one you just wrote and that `/impl` will ask which to run.
 - **`Status: IMPLEMENTING`** — work is in flight. Revising is legitimate — it is what `/impl` does when a step meets reality — but set `Status:` back to `PLANNING`, **preserve the `Base:` and `Branch:` lines `/impl` wrote beside it** (that sha is its `git rebase --autosquash` target, that branch is where the work is, and rewriting the header block is exactly how they get lost), and tell the user plainly that `/impl` will resume against a changed plan.
 - **`Status: DONE`** — that plan is spent and stays spent. New work gets a new file; an amendment to work that already landed is new work too. Ask which it is only when the distinction changes what you write, not as a formality — nothing is at risk of being overwritten.
+
+Those cases are about work that was already written down. The other way one plan becomes two is that the work in front of you was never one piece: `../pln/references/splitting.md` carries the test for that, how to put the proposal to the user, and the rule that the boundaries are theirs to draw. Run it before you write, not after — a split proposed once the file exists costs a rewrite, and a split never proposed costs the user a plan they cannot finish in one go.
 
 ## Human input in the file: `∫∫...∫∫`
 
@@ -206,7 +209,7 @@ Only `/impl` leaves planning mode.
 
 ## Reporting back
 
-Step 9, and it has a shape. In a couple of lines, in your own words:
+Step 10, and it has a shape. In a couple of lines, in your own words:
 
 - **what changed in the plan** — the user should not have to diff the file to learn what you did;
 - **where it is**, on the call that created it: the plan's path, once. Not on every revision.
