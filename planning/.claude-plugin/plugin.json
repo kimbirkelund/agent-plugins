@@ -2,7 +2,7 @@
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "planning",
   "version": "0.7.1",
-  "description": "Plan-driven workflow over a separate plans repository. /pln captures what is being discussed as a durable, committed plan and holds planning mode; /oimpl creates the worktree, attaches it to the plan and opens a session for the work; /impl validates the plan and executes it with a delegated team; /rewrt consumes the marker notes written into files; /migrate-pln moves an old working-tree PLAN.md into the plans repository; /archive-sessions files the conversations that produced a piece of work into the vault.",
+  "description": "Plan-driven workflow over a separate plans repository. /pln captures what is being discussed as a durable, committed plan and holds planning mode; /oimpl creates the worktree, attaches it to the plan and opens a session for the work; /impl validates the plan and executes it with a delegated team; /ipln runs the same conversation but files the result as issues in the repository's own tracker, drafted locally and posted only on an explicit go-ahead; /rewrt consumes the marker notes written into files; /migrate-pln moves an old working-tree PLAN.md into the plans repository; /archive-sessions files the conversations that produced a piece of work into the vault.",
   "author": {
     "name": "Kim Birkelund"
   },
