@@ -1,17 +1,16 @@
 # planning
 
-Plan-driven workflow. Eight commands and five scripts:
+Plan-driven workflow. Seven commands and five scripts:
 
-| Command             | Does                                                                                                                                                                       |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/pln`              | Captures what is being discussed as a plan in the plans repository, then holds planning mode. `/pln <letter\|name>` refines an existing plan instead. Writes nothing else. |
-| `/oimpl`            | Validates the plan, creates the worktree, writes it into the plan, and opens an interactive session there. Does not run the plan.                                          |
-| `/impl`             | Runs the plan in that session with a delegated team. Creates the branch itself when run directly on a plan without one.                                                    |
-| `/ipln`             | Same conversation as `/pln`, but the deliverable is issues in this repository's own tracker — drafted locally, shown for review, posted only on an explicit go-ahead.      |
-| `/migrate-pln`      | Moves an old working-tree `PLAN.md` into the plans repository, in the current format. One-shot, per plan.                                                                  |
-| `/rewrt`            | Consumes `∫∫...∫∫` marker notes written into files.                                                                                                                        |
-| `/list-plns`        | Lists this repository's plans — unfinished by default, in flight last, each with the letter `/pln` and `/oimpl` accept as a selector. Read-only.                           |
-| `/archive-sessions` | Files the Claude Code conversations that produced a piece of work into the vault. Optional; never touches the plan.                                                        |
+| Command        | Does                                                                                                                                                                       |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/pln`         | Captures what is being discussed as a plan in the plans repository, then holds planning mode. `/pln <letter\|name>` refines an existing plan instead. Writes nothing else. |
+| `/oimpl`       | Validates the plan, creates the worktree, writes it into the plan, and opens an interactive session there. Does not run the plan.                                          |
+| `/impl`        | Runs the plan in that session with a delegated team. Creates the branch itself when run directly on a plan without one.                                                    |
+| `/ipln`        | Same conversation as `/pln`, but the deliverable is issues in this repository's own tracker — drafted locally, shown for review, posted only on an explicit go-ahead.      |
+| `/migrate-pln` | Moves an old working-tree `PLAN.md` into the plans repository, in the current format. One-shot, per plan.                                                                  |
+| `/rewrt`       | Consumes `∫∫...∫∫` marker notes written into files.                                                                                                                        |
+| `/list-plns`   | Lists this repository's plans — unfinished by default, in flight last, each with the letter `/pln` and `/oimpl` accept as a selector. Read-only.                           |
 
 ## Plans live in their own repository
 
