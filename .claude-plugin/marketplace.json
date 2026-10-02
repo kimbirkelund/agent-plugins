@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "planning",
-      "description": "Plan-driven workflow: capture a plan in its own git repository, execute it with a delegated team in a branch or worktree of its own, consume in-file markers, and archive the conversations that produced the work.",
+      "description": "Plan-driven workflow: capture a plan in its own git repository, execute it with a delegated team in a branch or worktree of its own, and consume in-file markers.",
       "source": "./planning",
       "category": "workflow"
     }

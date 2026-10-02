@@ -57,7 +57,7 @@ Nothing changes on disk — no edits, no state-changing commands, no branch, no 
 2. **It carries a recognised `Status:`** from the table in `execution.md`, and which one it is decides what happens next, before any other check:
    - `PLANNING` — the normal case. Continue through the rest of the gate.
    - `IMPLEMENTING` — a previous run was interrupted. Do not restart from step one. Read the progress notes, identify the first step not recorded as landed, and tell the user what already landed, what is next, and whether any `fixup!` is still waiting to be rolled up. Then resume from there at the pacing `Checkpoints:` sets, on the branch the plan's `Branch:` line names. If the notes are too thin to say where the work stopped, that is the failure to report — stop and say so rather than guessing which steps are already committed.
-   - `DONE` — the plan is spent. Refuse and say so. The plan and its history stay where they are; point the user at `/pln` for the next piece of work, and at `/archive-sessions` if they want this run's conversations filed into the vault. Re-running a finished plan re-does landed work.
+   - `DONE` — the plan is spent. Refuse and say so. The plan and its history stay where they are; point the user at `/pln` for the next piece of work. Re-running a finished plan re-does landed work.
 3. **It has a `## How to execute plan` section.**
 4. **It states `Team:`** — a list of member names carrying at least one implementer, a verifier and a reviewer. The floor is not negotiable and you may not staff below it: the verifier and the reviewer are the run's only independent judgement, and an agent grading its own work grades generously. A `Team:` short a role fails the gate; it is not something you make up for by being careful.
 5. **It states `Parallel:`** — step groups that may run at once, every number of which exists in `## Steps`, or the literal `none`. This line is `/pln`'s call, not yours, because disjointness is a fact about code and you may not read code. You may narrow it during the run; you may never widen it.
@@ -229,7 +229,7 @@ So say when you get there. Once no `fixup!` is left standing — each step rolle
 
 All four are things you did, so `DONE` is your own judgement about the work and never a wait on what happens next. Whatever follows your report is the user's move, not a precondition — so do not leave `Status: IMPLEMENTING` standing in anticipation of it. That status means a run was interrupted, and a fresh `/impl` reading it will try to resume work that already landed.
 
-Then leave the plan where it is. It is not scaffolding to clear away any more — the plans repository keeps it, `DONE`, with the history of how the thinking moved, and that history is the thing worth having. Do not delete it and do not move it. If the user wants this run's conversations filed alongside their notes, `/archive-sessions` does that; mention it once and let them decide.
+Then leave the plan where it is. It is not scaffolding to clear away any more — the plans repository keeps it, `DONE`, with the history of how the thinking moved, and that history is the thing worth having. Do not delete it and do not move it. Remind the user once, in the final report, that Claude Code's built-in `/insights` is worth running from time to time; it is a periodic habit, not something to run now.
 
 ## Reporting back
 
