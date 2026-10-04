@@ -57,60 +57,75 @@ than a couple of lines against the codebase, that is the signal to delegate inst
 
 ## Picking the member
 
-### Fresh, named, or fork
+### Named, always; fresh or fork
 
-**Default to fresh.** A cold reader is a better reader for anything that should stand on
-its own, and a fresh member cannot carry a stale assumption from three steps ago.
+**Every member is a named agent. No exceptions.** Pass a `name` on every spawn, whatever
+the job and however small. Naming is not a label, it is a switch: with agent teams
+enabled, a named member launches as a **teammate** rather than a one-shot subagent, and
+that changes how it works for the rest of the run. An unnamed spawn is not a lighter
+option for a quick job; it is a member you cannot reach, and it is not used. See
+_Teammates, not subagents_ below for what the two mechanisms actually are.
 
-**Name every member.** Naming is not a label, it is a switch: with agent teams enabled, a
-named member launches as a **teammate** rather than a one-shot subagent, and that changes
-how it works for the rest of the run. See _Teammates, not subagents_ below for what the two
-mechanisms actually are.
+**All communication goes through `SendMessage`, in both directions.** You spawn a member
+once, with its name and its first prompt. Every later exchange — the next step, a
+follow-up question, an answer, a failure handed back — goes to that name by
+`SendMessage`, never by spawning again. The member, in turn, reports, asks and answers by
+`SendMessage` to you, by your name. There is no other channel: not a file it leaves for
+you, not a transcript you go reading, not a fresh spawn that happens to carry the same
+job. The prompt says so, because a member will not assume it.
+
+**Fresh, by default, for a new subsystem.** A cold reader is a better reader for anything
+that should stand on its own, and a fresh member cannot carry a stale assumption from three
+steps ago. Fresh means newly spawned, and still named.
 
 What naming buys: the member is addressable — `SendMessage` to ask a follow-up or hand back
 a failure, `TaskStop` to kill one that has hung — and it can reach you while it works. An
-unnamed member that stops reporting cannot be reached or cleaned up, only abandoned. Naming
-also pays off directly when you address it again: a follow-up question about a subsystem it
-just mapped, or a fix to code it just wrote. Continuing it keeps its context and costs one
-small exchange; re-spawning pays for a cold start and re-reads everything. The `Team:` line
-in `execution.md` is built on this, and the rules there govern when reuse stops being an
-advantage.
+unnamed member that stops reporting cannot be reached or cleaned up, only abandoned, which
+is why there are none. Naming also pays off directly when you address it again: a
+follow-up question about a subsystem it just mapped, or a fix to code it just wrote.
+Continuing it keeps its context and costs one small exchange; re-spawning pays for a cold
+start and re-reads everything. The `Team:` line in `execution.md` is built on this, and the
+rules there govern when reuse stops being an advantage.
 
 **Fork almost never.** A fork inherits your full context, which was the old justification
 for having one author the plan — that job is now yours. What is left is the rare bulky
 job that genuinely needs the whole discussion and would be lossy to summarize into a
-prompt. If you can state the job in a paragraph, it does not need a fork. Forks always
-run on your model; a `model` override is ignored, so don't pass one.
+prompt. If you can state the job in a paragraph, it does not need a fork. A fork is
+named like every other member and talks to you the same way. Forks always run on your
+model; a `model` override is ignored, so don't pass one.
 
 ### Teammates, not subagents
 
-A named member is a teammate. An unnamed one is a plain subagent. Both do work somewhere
-else and hand back a conclusion, but they are different mechanisms and the difference
-decides several rules below.
+A named member is a teammate. An unnamed one would be a plain subagent, and that is not an
+option for a member: the right-hand column below is there only to show what you would lose.
+Both do work somewhere else and hand back a conclusion, but they are different mechanisms
+and the difference decides several rules below.
 
-|                           | Named — **teammate**                                                  | Unnamed — subagent                                   |
-| ------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------- |
-| How its answer arrives    | An idle notification, each time it stops, carrying that turn's answer | One result, once, when it finishes                   |
-| Addressable afterwards    | Yes — `SendMessage`, `TaskStop`                                       | No                                                   |
-| Can reach you mid-work    | Yes, unprompted                                                       | Don't count on it — it has no name for you to answer |
-| Can spawn its own members | Unnamed subagents only, in the foreground — never a named teammate    | —                                                    |
+|                           | Named — **teammate**, every member                                     | Unnamed — subagent, what you would lose              |
+| ------------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------- |
+| How its answer arrives    | A `SendMessage` to you each time it reports, then an idle notification | One result, once, when it finishes                   |
+| Addressable afterwards    | Yes — `SendMessage`, `TaskStop`                                        | No                                                   |
+| Can reach you mid-work    | Yes, unprompted                                                        | Don't count on it — it has no name for you to answer |
+| Can spawn its own helpers | Unnamed subagents only, in the foreground — never a named teammate     | —                                                    |
 
 Three consequences worth holding onto:
 
-- **A teammate reports every turn, not once.** Every time you re-address one it goes idle
-  again and notifies you again. The output contract therefore binds each of those turns,
-  not the job as a whole.
+- **A teammate reports every turn, not once.** Every time you re-address one it reports
+  to you by `SendMessage` again, then goes idle. The output contract therefore binds each
+  of those turns, not the job as a whole.
 - **A teammate can ask.** It does not have to guess or stall when it hits something the
-  prompt does not cover; it can message you mid-work and wait for an answer. Say so in the
-  prompt, because it will not assume it.
+  prompt does not cover; it can `SendMessage` you mid-work and wait for your answer, which
+  comes back the same way. Say so in the prompt, with your name, because it will not
+  assume it.
 - **The roster is flat.** Handing a member a job that needs its own team does not work —
-  the attempt is refused outright. Any member it does spawn runs in the foreground of its
-  own turn, so a member cannot fan out and report back to you in the meantime. Partition
-  the work so each member's job is one member's job.
+  the attempt is refused outright. Any subagent a member does spawn is its own tool, not a
+  member of the team: it runs in the foreground of that member's turn and never talks to
+  you, so a member cannot fan out and report back to you in the meantime. Partition the
+  work so each member's job is one member's job.
 
 There is also no shared task list here. Agent teams have one, but it is gated on the Task
 tools, and neither this session nor a `general-purpose` member has them — so coordination
-is entirely by message, and the ledger below is the only record of what is running.
+is entirely by `SendMessage`, and the ledger below is the only record of what is running.
 
 ### Which type
 
@@ -141,8 +156,9 @@ Route on the _cost of a wrong judgment call_, not on how much typing is involved
   - Under `/pln`, propose it and get the human's agreement before spawning. Say what
     makes the work hard enough to need it.
   - Under `/impl`, use it only where the plan calls it out explicitly for that step. A
-    silent plan means no. If a step turns out to need it, that is a deviation — stop and
-    take it back to the plan.
+    silent plan means no: if a step looks like it needs more, it stays on `opus`, and the
+    lead records that under `## Divergences` per the judgement-call rule in
+    `execution.md`. It is not a stop.
 - Omit `model` to inherit the session model when you genuinely can't tell. That beats
   routing to a model you can't give a reason for. Other names may appear on the roster;
   don't use one whose niche you can't state.
@@ -184,7 +200,9 @@ messages ago. The prompt is its entire world. Include:
 4. **The constraints that bind here** — the repo's format and lint requirement, tests
    alongside the change, whatever the plan pinned. Don't assume it inferred them.
 5. **What done looks like** — the condition you will judge the result by.
-6. **The output contract** (below). Always last, always explicit.
+6. **How to reach you** — your name, and that every report, question and answer goes to
+   you by `SendMessage` and nowhere else.
+7. **The output contract** (below). Always last, always explicit.
 
 You hold the plan, so quote the step you are handing off **in full** rather than
 paraphrasing it, and give the member the plan's absolute path so it may read the plan
@@ -196,10 +214,13 @@ step is the most common way a delegated job comes back wrong.
 
 Every prompt ends with one. Three things make it work, and all three are easy to leave out.
 
-**Say that the final message is the return value.** A `general-purpose` member does not
-know it is talking to a program. Unsaid, it writes a friendly summary for a human reader,
-because that is its default posture. Told plainly — "your final message is the return
-value; it is read by a program, not a person" — it returns data.
+**Say that the report is the return value, and where it goes.** A `general-purpose` member
+does not know it is talking to a program. Unsaid, it writes a friendly summary for a human
+reader, because that is its default posture. Told plainly — "your report is the return
+value; send it to me by `SendMessage`, and it is read by a program, not a person" — it
+returns data, to you. The template below also has it end its turn with the same block.
+Count only the `SendMessage` copy as the report and ignore the final-message duplicate, so
+the ledger never records one turn twice.
 
 **Ask for a fenced `json` block.** You always branch on the result: accept, re-ask, hand
 back, surface. Prose has no failure signal — a rambling report and a good one both simply
@@ -213,18 +234,20 @@ problem, or say what it could not reach, has nowhere to put it and either drops 
 stalls. "The json block is the payload; anything outside it is ignored" gets you the same
 parseable result without the member fighting the instruction.
 
-**Say the contract binds every turn.** A named member is a teammate, and a teammate
-notifies you with its answer every time it goes idle — so a member you re-address for a
-second step, or hand a failed verification back to, reports again. Unsaid, it treats the
-contract as spent on its first report and answers the follow-up in prose. "This contract
-holds for every reply you make, not just the first" is the whole fix.
+**Say the contract binds every turn.** Every member is a teammate, and a teammate reports
+to you every time it finishes a turn — so a member you re-address for a second step, or
+hand a failed verification back to, reports again. Unsaid, it treats the contract as spent
+on its first report and answers the follow-up in prose. "This contract holds for every
+reply you make, not just the first" is the whole fix.
 
 A serviceable default, adapt the fields per job:
 
 ````
-Your final message is the return value — read by a program, not a person. Emit one fenced
-json block; anything outside it is ignored. This holds for every reply you make, not only
-your first.
+Your report is the return value — read by a program, not a person. Send it to me,
+<lead name>, by SendMessage, and end your turn with the same block as your final message.
+The SendMessage copy is the report; the final-message copy is a duplicate I ignore.
+Emit one fenced json block; anything outside it is ignored. This holds for every reply you
+make, not only your first.
 
 ```json
 {
@@ -234,8 +257,9 @@ your first.
 }
 ```
 
-If you need a decision I have not given you, do not guess and do not stop: message me with
-the question while you work, or return `QUESTION` with it in `evidence`. Asking costs one
+If you need a decision I have not given you, do not guess and do not stop: SendMessage me
+the question while you work, or report `QUESTION` with it in `evidence`. My answer comes
+back by SendMessage. Asking costs one
 exchange; guessing costs the step.
 ````
 
@@ -246,7 +270,8 @@ knowing, and a fixed shape is what tells you.
 `QUESTION` is not a failure and is cheaper than either alternative. A member that guesses
 produces work you have to unpick; a member that stalls burns the run's wall-clock and
 reports nothing. Judging the question is your job — you hold the plan and the conversation
-— so make asking the obviously licensed move.
+— so make asking the obviously licensed move, and answer by `SendMessage` to the member's
+name.
 
 ## While work is outstanding
 
@@ -262,24 +287,26 @@ blur together.
   what is pending instead.
 - **Never infer a result that has not arrived.** No notification means still running, not
   finished-and-probably-fine. Reconcile each report against the ledger before acting on it,
-  and if you cannot tell which job a report belongs to, ask the member rather than guessing.
+  and if you cannot tell which job a report belongs to, ask the member by `SendMessage`
+  rather than guessing.
 
 **Reports are not the only thing that arrives.** A teammate can message you mid-work,
 unprompted — a question, a partial finding, something it hit that the prompt did not cover.
 That is not noise and not a report: it is a member doing the right thing instead of
-guessing. Answer it, note it against the ledger, and do not treat the job as finished until
-its idle notification actually lands.
+guessing. Answer it by `SendMessage`, note it against the ledger, and do not treat the job
+as finished until its report actually lands.
 
-When a member goes quiet, what you have is the ledger, `SendMessage` to poke a named one,
-and `TaskStop` to kill a hung one by name so you can re-dispatch. **`ListAgents` is not the
+When a member goes quiet, what you have is the ledger, `SendMessage` to poke it by name,
+and `TaskStop` to kill a hung one by name so you can re-dispatch it to a fresh named
+member. **`ListAgents` is not the
 tool for this** — in this session it lists other Claude sessions, not the members you
 spawned, and members do not have it at all.
 
-**Never read a subagent task's `.output` file.** It is a symlink to that member's entire
+**Never read a member's task `.output` file.** It is a symlink to that member's entire
 conversation transcript as JSONL, and reading it will overflow this window — destroying the
 exact thing every rule here exists to protect. Chasing a lost report is precisely when the
-file looks tempting. If a report never came, poke the member; if that fails, stop it and
-re-dispatch.
+file looks tempting. If a report never came, poke the member by `SendMessage`; if that
+fails, stop it and re-dispatch.
 
 ## Relaying
 
