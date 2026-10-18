@@ -119,6 +119,10 @@ Route the model by how much judgment the step still needs — not by how much co
 
 Each prompt must stand alone. Give it the repository root **as it now is** — the worktree, if the hook made one — the step **quoted in full** from the plan, the constraints that bind in this repository, the condition that makes the step done, and the plan's absolute path so it can read the plan itself for surrounding detail. That path is no longer guessable from the repository, so a member that is not given it cannot find it. Tell it not to commit — committing is yours, for the reasons below — so it leaves its work in the tree and reports the paths. Then the rest of the prompt items `delegation.md` lists, ending with how to reach you — report by `SendMessage` to your name — and its output contract.
 
+Each member's **initial prompt** — the one you give when you spawn it, not the later `SendMessage` turns — also carries, near its start and before the output contract, verbatim, the sentence below, whatever the member's role: implementer, verifier or reviewer. Copy it; do not paraphrase it. The run is unattended and the user is waiting on its result, so a member that does not know time matters will spend it freely.
+
+> Time matters here: do not spend time that can be avoided, and the earlier a correct result is obtained, the better.
+
 Members get autonomy over how they solve the step. They do not get autonomy over what the step is; work the plan does not call for is out of scope even when it looks obviously worth doing. If a member reports that kind of finding, it goes in the plan — not into the diff, and not into a branch or worktree of its own. A separate fix is separate work the user opens deliberately, not something this run spawns on the side.
 
 ### Tracking what is running
