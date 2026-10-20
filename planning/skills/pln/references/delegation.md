@@ -218,9 +218,7 @@ Every prompt ends with one. Three things make it work, and all three are easy to
 does not know it is talking to a program. Unsaid, it writes a friendly summary for a human
 reader, because that is its default posture. Told plainly — "your report is the return
 value; send it to me by `SendMessage`, and it is read by a program, not a person" — it
-returns data, to you. The template below also has it end its turn with the same block.
-Count only the `SendMessage` copy as the report and ignore the final-message duplicate, so
-the ledger never records one turn twice.
+returns data, to you.
 
 **Ask for a fenced `json` block.** You always branch on the result: accept, re-ask, hand
 back, surface. Prose has no failure signal — a rambling report and a good one both simply
