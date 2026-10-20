@@ -242,10 +242,8 @@ A serviceable default, adapt the fields per job:
 
 ````
 Your report is the return value — read by a program, not a person. Send it to me,
-<lead name>, by SendMessage, and end your turn with the same block as your final message.
-The SendMessage copy is the report; the final-message copy is a duplicate I ignore.
-Emit one fenced json block; anything outside it is ignored. This holds for every reply you
-make, not only your first.
+<lead name>, by SendMessage. Emit one fenced json block; anything outside it is ignored.
+This holds for every reply you make, not only your first.
 
 ```json
 {
