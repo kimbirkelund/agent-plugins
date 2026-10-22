@@ -162,6 +162,28 @@ Placeholders:
 | `worktree` | `{repo}` — repository root; `{name}` — kebab-case slug from the plan's title; `{plan}` |
 | `session`  | `{path}` — the worktree's absolute path; plus `{repo}`, `{branch}`, `{plan}`           |
 
+## Report gate hook
+
+`hooks/hooks.json` registers a `TeammateIdle` hook that runs
+`scripts/Invoke-ReportGate.ps1`. It enforces `/impl`'s output contract: a teammate must
+deliver its report by `SendMessage`, because a turn that ends in prose reaches nobody.
+
+When a teammate is about to go idle and has not sent a `SendMessage` since its last
+assignment, the hook exits 2 and feeds back a reminder to deliver the completion report to
+the lead. The hook gates every teammate, not only those spawned by `/impl`.
+
+- **Cap** — at most 2 pushbacks per teammate per session. After the second, the hook gives
+  up, prints `ReportGateHook: <key> idled without a delivered report` and lets the teammate
+  idle. Later idles are silent.
+- **State** — counters live in `$CLAUDE_PLUGIN_DATA/report-gate/<session_id>.json`, keyed by
+  `<session_id>:<agent_id or teammate_name>`. When `CLAUDE_PLUGIN_DATA` is unset, the system
+  temp directory is used.
+- **Fail open** — a missing, unreadable or over-5 MB transcript, bad input, a payload without
+  `session_id` or without any teammate identity, or a state-file error never blocks the
+  teammate.
+- **Scope** — `TeammateIdle` fires only in agent-teams sessions
+  (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`). Elsewhere the hook never runs.
+
 ## Shipping a change
 
 Bump `version` in `.claude-plugin/plugin.json` — `claude plugin update` compares nothing
