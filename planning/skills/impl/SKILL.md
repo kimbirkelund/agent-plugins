@@ -168,7 +168,7 @@ decide and nothing to record.
 
 ### Verifying
 
-Whatever the plan says to verify goes to its own member — a build log is exactly the payload that must never land here. Use a cheap model; running a command and reading its result is mechanical. Have it return pass or fail, and on failure the shortest line that identifies the cause, quoted exactly, plus the failing test or target name. Not the log.
+Whatever the plan says to verify goes to its own member — a build log is exactly the payload that must never land here. Use a cheap model; running a command and reading its result is mechanical. Tell it to run the command in the foreground and never with `run_in_background`: a teammate with a background task idles without reporting, and nothing re-wakes the lead. Have it return pass or fail, and on failure the shortest line that identifies the cause, quoted exactly, plus the failing test or target name. Not the log.
 
 The verifier is a role on the plan's `Team:`, and it never implements — not the step it is checking, not any other. An agent grading its own work grades generously, and a verifier that starts fixing things has stopped verifying.
 
