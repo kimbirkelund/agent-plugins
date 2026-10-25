@@ -172,15 +172,21 @@ When a teammate is about to go idle and has not sent a `SendMessage` since its l
 assignment, the hook exits 2 and feeds back a reminder to deliver the completion report to
 the lead. The hook gates every teammate, not only those spawned by `/impl`.
 
+- **Transcript** — the payload's `transcript_path` is the lead session's, not the
+  teammate's. The hook derives the teammate's transcript from it:
+  `<dir of transcript_path>/<session_id>/subagents/agent-<agent_id>.jsonl`. `agent_id` is
+  required; without it the hook cannot locate the teammate's transcript and exits 0. The
+  first entry of the derived file must carry an `agentId` equal to `agent_id`, otherwise the
+  file is not trusted and the hook exits 0.
 - **Cap** — at most 2 pushbacks per teammate per session. After the second, the hook gives
   up, prints `ReportGateHook: <key> idled without a delivered report` and lets the teammate
   idle. Later idles are silent.
 - **State** — counters live in `$CLAUDE_PLUGIN_DATA/report-gate/<session_id>.json`, keyed by
-  `<session_id>:<agent_id or teammate_name>`. When `CLAUDE_PLUGIN_DATA` is unset, the system
+  `<session_id>:<agent_id>`. When `CLAUDE_PLUGIN_DATA` is unset, the system
   temp directory is used.
-- **Fail open** — a missing, unreadable or over-5 MB transcript, bad input, a payload without
-  `session_id` or without any teammate identity, or a state-file error never blocks the
-  teammate.
+- **Fail open** — a missing, unreadable or over-5 MB derived transcript, an `agentId`
+  mismatch, bad input, a payload without `session_id` or `agent_id`, or a state-file error
+  never blocks the teammate.
 - **Scope** — `TeammateIdle` fires only in agent-teams sessions
   (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`). Elsewhere the hook never runs.
 
