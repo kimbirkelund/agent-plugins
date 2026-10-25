@@ -5,12 +5,16 @@
 .DESCRIPTION
     /impl teammates must report to the lead by SendMessage every turn. A teammate that ends
     its turn in prose reaches nobody, so this hook is the enforcement. It runs when a
-    teammate is about to go idle and reads the teammate's own transcript (transcript_path
-    in the hook payload). If no SendMessage was made since the teammate's last assignment,
-    the hook writes a reminder to stderr and exits 2, which keeps the teammate working.
+    teammate is about to go idle and reads the teammate's own transcript. The payload's
+    transcript_path is the lead session's, so the teammate's is derived from it:
+    <dir of transcript_path>/<session_id>/subagents/agent-<agent_id>.jsonl. The first parsed
+    entry's agentId must equal agent_id, otherwise the file is not trusted. If no SendMessage
+    was made since the teammate's last assignment, the hook writes a reminder to stderr and
+    exits 2, which keeps the teammate working.
 
-    An assignment is a user entry whose text starts with `<teammate-message`, other than one
-    that is this hook's own feedback. Tool results never count. When the transcript holds no
+    An assignment is a user entry whose text starts with `<teammate-message`, optionally
+    after `Another Claude session sent a message:`, other than one that is this hook's own
+    feedback. Tool results never count. When the transcript holds no
     assignment, the first line (the spawn prompt) is the assignment. A report is an assistant
     entry after the last assignment with a SendMessage tool_use block. The recipient is not
     checked: a question to the lead is also a legitimate end of turn.
@@ -22,9 +26,9 @@
     a -1 key exits 0 silently from then on. The key is never deleted on give-up, otherwise
     the next idle would start the count over.
 
-    The hook fails open: missing or unparsable input, a payload without session_id or without
-    both agent_id and teammate_name, a missing or oversized transcript, a bad transcript line
-    and any state-file error all exit 0.
+    The hook fails open: missing or unparsable input, a payload without session_id or
+    agent_id, a missing or oversized derived transcript, an agentId mismatch, a bad transcript
+    line and any state-file error all exit 0.
 
 .PARAMETER InputJson
     Hook payload as a JSON string. Read from stdin when omitted.
@@ -88,15 +92,21 @@ try
 
     # Without both halves of the key, state would be shared across sessions or teammates.
     $sessionId = [string] $payload.session_id
-    $member = if ($payload.agent_id) { [string] $payload.agent_id } else { [string] $payload.teammate_name }
-    if (-not $sessionId -or -not $member)
+    $agentId = [string] $payload.agent_id
+    if (-not $sessionId -or -not $agentId)
     {
         exit 0
     }
-    $key = "${sessionId}:$member"
+    $key = "${sessionId}:$agentId"
 
-    $transcript = $payload.transcript_path
-    if (-not $transcript -or -not (Test-Path -LiteralPath $transcript -PathType Leaf))
+    # transcript_path is the lead's; the teammate's transcript lives beside it.
+    $leadTranscript = [string] $payload.transcript_path
+    if (-not $leadTranscript)
+    {
+        exit 0
+    }
+    $transcript = Join-Path (Split-Path $leadTranscript) $sessionId 'subagents' "agent-$agentId.jsonl"
+    if (-not (Test-Path -LiteralPath $transcript -PathType Leaf))
     {
         exit 0
     }
@@ -123,7 +133,17 @@ try
         {
             continue
         }
+        # A blank line parses to $null without throwing.
+        if ($null -eq $entry)
+        {
+            continue
+        }
         [pscustomobject]@{ Index = $i; Entry = $entry }
+    }
+
+    if ($entries -and [string] @($entries)[0].Entry.agentId -ne $agentId)
+    {
+        exit 0
     }
 
     foreach ($item in $entries)
@@ -133,8 +153,8 @@ try
             continue
         }
         $text = (Get-EntryText $item.Entry).TrimStart()
-        $body = ($text -replace '^<teammate-message(?:\s+[\w-]+="[^"]*")*\s*>', '').TrimStart()
-        if ($text.StartsWith('<teammate-message') -and -not $body.StartsWith($feedbackPrefix))
+        $body = ($text -replace '^(?:Another Claude session sent a message:\s*)?<teammate-message(?:\s+[\w-]+="[^"]*")*\s*>', '').TrimStart()
+        if ($text -match '^(Another Claude session sent a message:\s*)?<teammate-message' -and -not $body.StartsWith($feedbackPrefix))
         {
             $lastAssignment = $item.Index
         }
