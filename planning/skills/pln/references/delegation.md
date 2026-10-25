@@ -236,14 +236,18 @@ parseable result without the member fighting the instruction.
 to you every time it finishes a turn — so a member you re-address for a second step, or
 hand a failed verification back to, reports again. Unsaid, it treats the contract as spent
 on its first report and answers the follow-up in prose. "This contract holds for every
-reply you make, not just the first" is the whole fix.
+reply you make, not just the first" is the whole fix. The template ends each turn with a
+one-word `sent` reply after the SendMessage, so a member whose reply is the JSON again has
+misread the contract.
 
 A serviceable default, adapt the fields per job:
 
 ````
 Your report is the return value — read by a program, not a person. Send it to me,
-<lead name>, by SendMessage. Emit one fenced json block; anything outside it is ignored.
-This holds for every reply you make, not only your first.
+<lead name>, by SendMessage. The SendMessage is the report: one fenced json block, anything
+outside it is ignored. After it returns, reply with the single word `sent` and stop; anything
+else you need to raise also goes by SendMessage. This holds for every reply you make, not
+only your first.
 
 ```json
 {
