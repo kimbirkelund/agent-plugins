@@ -5,6 +5,10 @@ BeforeAll {
     function script:ConvertTo-Line
     {
         param([hashtable] $Entry)
+        if (-not $Entry.ContainsKey('agentId'))
+        {
+            $Entry.agentId = 'a1'
+        }
         $Entry | ConvertTo-Json -Depth 8 -Compress
     }
 
@@ -50,8 +54,13 @@ BeforeAll {
 
     function script:New-Payload
     {
-        param([string] $Transcript, [hashtable] $Extra = @{})
-        (@{ session_id = 's1'; teammate_name = 'mate'; transcript_path = $Transcript } + $Extra) | ConvertTo-Json -Compress
+        param([hashtable] $Override = @{})
+        $payload = @{ session_id = 's1'; agent_id = 'a1'; teammate_name = 'mate'; transcript_path = $script:Lead }
+        foreach ($name in $Override.Keys)
+        {
+            $payload[$name] = $Override[$name]
+        }
+        $payload | ConvertTo-Json -Compress
     }
 
     function script:Get-State
@@ -64,24 +73,34 @@ BeforeAll {
 Describe 'Invoke-ReportGate' {
     BeforeEach {
         $script:State = Join-Path $TestDrive 'state'
-        $script:Transcript = Join-Path $TestDrive 'transcript.jsonl'
-        Remove-Item $script:State -Recurse -Force -ErrorAction SilentlyContinue
+        # transcript_path is the lead's; the teammate's file is derived beside it.
+        $script:Lead = Join-Path $TestDrive 's1.jsonl'
+        $script:Transcript = Join-Path $TestDrive 's1' 'subagents' 'agent-a1.jsonl'
+        Remove-Item $script:State, (Join-Path $TestDrive 's1'), $script:Lead -Recurse -Force -ErrorAction SilentlyContinue
+        New-Item -ItemType Directory -Force (Split-Path $script:Transcript) | Out-Null
+        Set-Content $script:Lead ''
     }
 
     Context 'report present' {
         It 'exits 0 and removes the state key' {
             New-Item -ItemType Directory -Force (Join-Path $script:State 'report-gate') | Out-Null
-            Set-Content (Join-Path $script:State 'report-gate' 's1.json') '{"s1:mate":1}'
+            Set-Content (Join-Path $script:State 'report-gate' 's1.json') '{"s1:a1":1}'
             Set-Content $script:Transcript @((New-Assignment), (New-Report))
-            $r = Invoke-Gate (New-Payload $script:Transcript) $script:State
+            $r = Invoke-Gate (New-Payload) $script:State
             $r.ExitCode | Should -Be 0
             $r.Stderr | Should -BeNullOrEmpty
-            (Get-State).ContainsKey('s1:mate') | Should -BeFalse
+            (Get-State).ContainsKey('s1:a1') | Should -BeFalse
+        }
+
+        It 'exits 0 when the lead transcript holds no SendMessage' {
+            Set-Content $script:Transcript @((New-Assignment), (New-Report))
+            Set-Content $script:Lead @((New-Assignment), (New-Prose))
+            (Invoke-Gate (New-Payload) $script:State).ExitCode | Should -Be 0
         }
 
         It 'ignores a SendMessage made before the last assignment' {
             Set-Content $script:Transcript @((New-Assignment), (New-Report), (New-Assignment), (New-Prose))
-            (Invoke-Gate (New-Payload $script:Transcript) $script:State).ExitCode | Should -Be 2
+            (Invoke-Gate (New-Payload) $script:State).ExitCode | Should -Be 2
         }
     }
 
@@ -91,42 +110,42 @@ Describe 'Invoke-ReportGate' {
         }
 
         It 'pushes back with the prefix and counts 1' {
-            $r = Invoke-Gate (New-Payload $script:Transcript) $script:State
+            $r = Invoke-Gate (New-Payload) $script:State
             $r.ExitCode | Should -Be 2
             $r.Stderr | Should -BeLike "$($script:Prefix)*"
-            (Get-State)['s1:mate'] | Should -Be 1
+            (Get-State)['s1:a1'] | Should -Be 1
         }
 
         It 'counts 2 on the second idle' {
-            1..2 | ForEach-Object { $r = Invoke-Gate (New-Payload $script:Transcript) $script:State }
+            1..2 | ForEach-Object { $r = Invoke-Gate (New-Payload) $script:State }
             $r.ExitCode | Should -Be 2
-            (Get-State)['s1:mate'] | Should -Be 2
+            (Get-State)['s1:a1'] | Should -Be 2
         }
 
         It 'gives up on the third idle with -1 and a stdout line' {
-            1..3 | ForEach-Object { $r = Invoke-Gate (New-Payload $script:Transcript) $script:State }
+            1..3 | ForEach-Object { $r = Invoke-Gate (New-Payload) $script:State }
             $r.ExitCode | Should -Be 0
-            $r.Stdout | Should -Be 'ReportGateHook: s1:mate idled without a delivered report'
-            (Get-State)['s1:mate'] | Should -Be -1
+            $r.Stdout | Should -Be 'ReportGateHook: s1:a1 idled without a delivered report'
+            (Get-State)['s1:a1'] | Should -Be -1
         }
 
         It 'stays silent on the fourth idle and keeps -1' {
-            1..4 | ForEach-Object { $r = Invoke-Gate (New-Payload $script:Transcript) $script:State }
+            1..4 | ForEach-Object { $r = Invoke-Gate (New-Payload) $script:State }
             $r.ExitCode | Should -Be 0
             $r.Stdout | Should -BeNullOrEmpty
             $r.Stderr | Should -BeNullOrEmpty
-            (Get-State)['s1:mate'] | Should -Be -1
+            (Get-State)['s1:a1'] | Should -Be -1
         }
 
-        It 'keys on agent_id when present' {
-            Invoke-Gate (New-Payload $script:Transcript @{ agent_id = 'agent-7' }) $script:State | Out-Null
-            (Get-State).ContainsKey('s1:agent-7') | Should -BeTrue
+        It 'keys on agent_id, not teammate_name' {
+            Invoke-Gate (New-Payload) $script:State | Out-Null
+            (Get-State).ContainsKey('s1:a1') | Should -BeTrue
             (Get-State).ContainsKey('s1:mate') | Should -BeFalse
         }
 
-        It 'falls back to teammate_name when agent_id is absent' {
-            Invoke-Gate (New-Payload $script:Transcript) $script:State | Out-Null
-            (Get-State).ContainsKey('s1:mate') | Should -BeTrue
+        It 'pushes back when only the lead transcript holds a SendMessage' {
+            Set-Content $script:Lead @((New-Assignment), (New-Report))
+            (Invoke-Gate (New-Payload) $script:State).ExitCode | Should -Be 2
         }
     }
 
@@ -134,49 +153,74 @@ Describe 'Invoke-ReportGate' {
         It 'does not count the feedback wrapped in a teammate-message tag as an assignment' {
             $wrapped = New-Assignment "<teammate-message teammate_id=`"system`">$($script:Prefix) as one fenced json block</teammate-message>"
             Set-Content $script:Transcript @((New-Assignment), (New-Report), $wrapped, (New-Prose))
-            (Invoke-Gate (New-Payload $script:Transcript) $script:State).ExitCode | Should -Be 0
+            (Invoke-Gate (New-Payload) $script:State).ExitCode | Should -Be 0
         }
 
         It 'does not count a tool_result entry as an assignment' {
             Set-Content $script:Transcript @((New-Assignment), (New-Report), (New-ToolResult), (New-Prose))
-            (Invoke-Gate (New-Payload $script:Transcript) $script:State).ExitCode | Should -Be 0
+            (Invoke-Gate (New-Payload) $script:State).ExitCode | Should -Be 0
         }
 
         It 'does not count feedback wrapped in a tag with a greater-than sign in an attribute' {
             $wrapped = New-Assignment "<teammate-message teammate_id=`"system`" summary=`"a > b`">$($script:Prefix) as one fenced json block</teammate-message>"
             Set-Content $script:Transcript @((New-Assignment), (New-Report), $wrapped, (New-Prose))
-            (Invoke-Gate (New-Payload $script:Transcript) $script:State).ExitCode | Should -Be 0
+            (Invoke-Gate (New-Payload) $script:State).ExitCode | Should -Be 0
+        }
+
+        It 'recognises an assignment prefixed with the session sentence' {
+            $prefixed = New-Assignment 'Another Claude session sent a message: <teammate-message teammate_id="mate">do it</teammate-message>'
+            Set-Content $script:Transcript @((New-Assignment), (New-Report), $prefixed, (New-Prose))
+            (Invoke-Gate (New-Payload) $script:State).ExitCode | Should -Be 2
+        }
+
+        It 'does not count prefixed feedback as an assignment' {
+            $wrapped = New-Assignment "Another Claude session sent a message: <teammate-message teammate_id=`"system`">$($script:Prefix) as one fenced json block</teammate-message>"
+            Set-Content $script:Transcript @((New-Assignment), (New-Report), $wrapped, (New-Prose))
+            (Invoke-Gate (New-Payload) $script:State).ExitCode | Should -Be 0
         }
 
         It 'accepts a report after an untagged spawn prompt' {
             Set-Content $script:Transcript @((New-Assignment 'plain spawn prompt'), (New-Report))
-            (Invoke-Gate (New-Payload $script:Transcript) $script:State).ExitCode | Should -Be 0
+            (Invoke-Gate (New-Payload) $script:State).ExitCode | Should -Be 0
         }
 
         It 'treats line 0 as the assignment, so a report on line 0 does not count' {
             Set-Content $script:Transcript @((New-Report))
-            (Invoke-Gate (New-Payload $script:Transcript) $script:State).ExitCode | Should -Be 2
+            (Invoke-Gate (New-Payload) $script:State).ExitCode | Should -Be 2
         }
     }
 
     Context 'fail open' {
-        It 'exits 0 when the transcript is missing' {
-            $r = Invoke-Gate (New-Payload (Join-Path $TestDrive 'nope.jsonl')) $script:State
+        It 'exits 0 when the derived transcript is missing' {
+            $r = Invoke-Gate (New-Payload) $script:State
             $r.ExitCode | Should -Be 0
             $r.Stderr | Should -BeNullOrEmpty
         }
 
         It 'exits 0 when the transcript is over 5 MB' {
-            $big = Join-Path $TestDrive 'big.jsonl'
-            $fs = [IO.File]::Create($big)
+            $fs = [IO.File]::Create($script:Transcript)
             $fs.SetLength(6MB)
             $fs.Dispose()
-            (Invoke-Gate (New-Payload $big) $script:State).ExitCode | Should -Be 0
+            (Invoke-Gate (New-Payload) $script:State).ExitCode | Should -Be 0
         }
 
         It 'skips a malformed line and still gates on the rest' {
             Set-Content $script:Transcript @((New-Assignment), '{not json', (New-Prose))
-            (Invoke-Gate (New-Payload $script:Transcript) $script:State).ExitCode | Should -Be 2
+            (Invoke-Gate (New-Payload) $script:State).ExitCode | Should -Be 2
+        }
+
+        It 'exits 0 when the first entry agentId differs from agent_id' {
+            $foreign = { param($Line) $Line -replace '"agentId":"a1"', '"agentId":"other"' }
+            Set-Content $script:Transcript @((& $foreign (New-Assignment)), (& $foreign (New-Prose)))
+            $r = Invoke-Gate (New-Payload) $script:State
+            $r.ExitCode | Should -Be 0
+            $r.Stderr | Should -BeNullOrEmpty
+            Test-Path (Join-Path $script:State 'report-gate') | Should -BeFalse
+        }
+
+        It 'skips a blank first line when checking the first entry agentId' {
+            Set-Content $script:Transcript @('', (New-Assignment), (New-Prose))
+            (Invoke-Gate (New-Payload) $script:State).ExitCode | Should -Be 2
         }
 
         It 'exits 0 on unparsable stdin' {
@@ -189,16 +233,17 @@ Describe 'Invoke-ReportGate' {
 
         It 'exits 0 without state when session_id is missing' {
             Set-Content $script:Transcript @((New-Assignment), (New-Prose))
-            $payload = @{ teammate_name = 'mate'; transcript_path = $script:Transcript } | ConvertTo-Json -Compress
+            $payload = @{ agent_id = 'a1'; transcript_path = $script:Lead } | ConvertTo-Json -Compress
             $r = Invoke-Gate $payload $script:State
             $r.ExitCode | Should -Be 0
             $r.Stderr | Should -BeNullOrEmpty
             Test-Path (Join-Path $script:State 'report-gate') | Should -BeFalse
         }
 
-        It 'exits 0 without state when agent_id and teammate_name are both missing' {
+        It 'exits 0 without state when agent_id is missing, even with teammate_name' {
             Set-Content $script:Transcript @((New-Assignment), (New-Prose))
-            $payload = @{ session_id = 's1'; transcript_path = $script:Transcript } | ConvertTo-Json -Compress
+            Set-Content (Join-Path (Split-Path $script:Transcript) 'agent-mate.jsonl') @((New-Assignment), (New-Prose))
+            $payload = @{ session_id = 's1'; teammate_name = 'mate'; transcript_path = $script:Lead } | ConvertTo-Json -Compress
             $r = Invoke-Gate $payload $script:State
             $r.ExitCode | Should -Be 0
             $r.Stderr | Should -BeNullOrEmpty
@@ -209,7 +254,7 @@ Describe 'Invoke-ReportGate' {
             Set-Content $script:Transcript @((New-Assignment), (New-Prose))
             $blocker = Join-Path $TestDrive 'blocker'
             Set-Content $blocker 'a file where a directory should be'
-            (Invoke-Gate (New-Payload $script:Transcript) $blocker).ExitCode | Should -Be 0
+            (Invoke-Gate (New-Payload) $blocker).ExitCode | Should -Be 0
         }
     }
 }
