@@ -38,7 +38,7 @@ plans repository, decides which plan is current, and reads the configuration bel
 lock while it does and syncing with the remote from time to time (see below).
 `scripts/Migrate-Plan.ps1` moves a plan written under the old working-tree convention into
 that layout. `scripts/Get-PlanList.ps1` lists a repository's plans, filtered and ordered,
-with the per-plan counts `/list-plns` reports. The skills call them rather than deriving paths, and every script has Pester
+with the per-plan counts `/list-plns` reports. `scripts/Resolve-PlanBranch.ps1` decides whether a plan lands on its own recorded branch or a fresh one, and refuses a branch another plan owns. The skills call them rather than deriving paths, and every script has Pester
 tests beside it.
 
 ## Issues go to the repository's own tracker
