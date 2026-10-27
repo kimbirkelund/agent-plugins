@@ -80,7 +80,7 @@ Do not draft the missing section, do not have a member draft it, and do not star
    - **`Worktree.Skill`** — invoke that skill. Hand it a short kebab-case slug derived from the plan's title and the repository root; it decides between a branch and a worktree, and it owns any prefix the user's convention wants. Do not second-guess either.
    - **`Worktree.Command`** — run it, with `{repo}` replaced by the repository root, `{name}` by the slug, and `{plan}` by the plan's absolute path.
    - **absent** — no hook is configured, so there is nothing to create. Say once that the work will land on the checked-out branch, and carry on there.
-3. **Record what came back** as `Branch:` in the plan's header block, and commit that write. Then continue in that branch or worktree — if the hook made a worktree, the work happens there, so every path you hand a member is inside it.
+3. **Record what came back** as `Branch:` in the plan's header block, after `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Resolve-PlanBranch.ps1" -Plan <absolute plan path> -Branch <the branch the hook returned>` succeeds (with no hook, pass the checked-out branch from `git branch --show-current`) — if it throws, report its message verbatim and stop — and commit that write. Then continue in that branch or worktree — if the hook made a worktree, the work happens there, so every path you hand a member is inside it.
 
 The slug is yours to derive and it is not a decision worth deliberating: the plan's title, lowercased and hyphenated. The hook names the branch; you name the work.
 
