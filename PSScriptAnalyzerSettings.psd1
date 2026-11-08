@@ -16,43 +16,43 @@
     )
     Rules        = @{
         # preset = Allman, openBraceOnSameLine = false
-        PSPlaceOpenBrace                       = @{
+        PSPlaceOpenBrace                          = @{
             Enable             = $true
             OnSameLine         = $false
             NewLineAfter       = $true
             IgnoreOneLineBlock = $true
         }
-        PSPlaceCloseBrace                      = @{
+        PSPlaceCloseBrace                         = @{
             Enable             = $true
             NewLineAfter       = $true
             IgnoreOneLineBlock = $true
             NoEmptyLineBefore  = $false
         }
         # pipelineIndentationStyle = IncreaseIndentationForFirstPipeline
-        PSUseConsistentIndentation             = @{
+        PSUseConsistentIndentation                = @{
             Enable              = $true
             Kind                = 'space'
             IndentationSize     = 4
             PipelineIndentation = 'IncreaseIndentationForFirstPipeline'
         }
         # trimWhitespaceAroundPipe + whitespaceBetweenParameters
-        PSUseConsistentWhitespace              = @{
-            Enable                                  = $true
-            CheckInnerBrace                         = $true
-            CheckOpenBrace                          = $true
-            CheckOpenParen                          = $true
-            CheckOperator                           = $true
-            CheckPipe                               = $true
-            CheckPipeForRedundantWhitespace         = $true
-            CheckSeparator                          = $true
-            CheckParameter                          = $true
+        PSUseConsistentWhitespace                 = @{
+            Enable                          = $true
+            CheckInnerBrace                 = $true
+            CheckOpenBrace                  = $true
+            CheckOpenParen                  = $true
+            CheckOperator                   = $true
+            CheckPipe                       = $true
+            CheckPipeForRedundantWhitespace = $true
+            CheckSeparator                  = $true
+            CheckParameter                  = $true
         }
-        PSAlignAssignmentStatement             = @{
+        PSAlignAssignmentStatement                = @{
             Enable         = $true
             CheckHashtable = $true
         }
         # useCorrectCasing
-        PSUseCorrectCasing                     = @{
+        PSUseCorrectCasing                        = @{
             Enable = $true
         }
         # useConstantStrings
