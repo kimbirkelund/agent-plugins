@@ -46,6 +46,16 @@ file's language and fix what they report.
   still complains, the linter loses — notably `PSUseConsistentWhitespace` flags the aligned
   `=` columns that `PSAlignAssignmentStatement` deliberately produces. Leave those.
 
+The hooks in `.claude/settings.json` run this automatically after every Write/Edit and after
+each Bash call (`Scripts/claude-hooks/`: `Format-File.ps1` for edits, `Format-DirtyFiles.ps1`
+for shell changes, both through `Format-Path.ps1`). The manual commands above remain the
+fallback. The hook leaves out `PSUseConsistentWhitespace`, in line with the rule above, and a
+finding it does report comes back as a hook error. Files outside the repository, under
+`.git/` or git-ignored are skipped, and a missing `prettier` or PSScriptAnalyzer is silently
+tolerated. Under the current `PSScriptAnalyzerSettings.psd1` every rule in `IncludeRules` is
+fixable by the formatter, so no `.ps1` lint finding ever reaches Claude through the hook; the
+lint path only fires for a rule added that the formatter cannot fix.
+
 ## PowerShell scripts: never dot-source another script
 
 A script must **not** dot-source another to reuse its functions. The only exception is a
