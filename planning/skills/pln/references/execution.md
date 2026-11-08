@@ -71,7 +71,7 @@ Every number must be a step in `## Steps` — which is why steps are numbered.
 
 Parallelisable means _these steps touch disjoint files_, which is a fact about the code.
 `/impl` is forbidden from reading source, so its only evidence is what members report
-after they have already run — too late to schedule on. `/pln` is the half that scouted the
+after they have already run — too late to schedule on. `/pln` is the half that researched the
 code, already names files per step, and has a human to ask. The information lives there,
 so the declaration does too.
 

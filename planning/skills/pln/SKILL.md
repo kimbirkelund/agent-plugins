@@ -15,7 +15,7 @@ Capture what we have been discussing as a durable plan in the plans repository, 
 2. **Locate the plan.** Run `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Get-PlanContext.ps1"` from the session's working directory. An argument with no whitespace is passed as `-Plan` first — `selected` means refine that plan — while one containing whitespace is always what to plan, and is never matched. See _Where the plan lives_ below for what it returns and how to act on each case. Read the plan in full if there is one.
 3. **Branch on `Status:`** — see _Write or merge_ below.
 4. **Harvest every `∫∫...∫∫` marker**, before folding in anything from the conversation.
-5. **Scout**, but only for questions the conversation genuinely left open.
+5. **Send agents**, but only for questions the conversation genuinely left open.
 6. **One plan or several.** Apply `../pln/references/splitting.md`; when it says split, propose the parts in your reply before writing, and write one plan per part the user accepts. This includes merging into an existing plan — when what you are about to fold in makes that plan two pieces, propose carving it in two rather than growing it, and let the user decide.
 7. **Decide `Team:`, `Parallel:`, `Checkpoints:` and `Verify:`**, then write or merge. Set `Status: PLANNING` and take `Updated:` from `date +%F` — run it, never write the date from memory.
 8. **Commit the plan** with `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Save-Plan.ps1"`. Every write, without exception — see _Committing the plan_.
@@ -83,7 +83,7 @@ Planning converges on one document, and you hold it, so there are no roles and n
 
 - **One question per agent.** An agent asked four things answers all four shallowly.
 - **Ask for a verdict and `path:line` references, capped at a handful of lines.** Never ask for the code itself — if you want to see a file, ask a better question.
-- **Reuse a scout when the follow-ups will keep coming.** If a subsystem is unfamiliar enough that you will ask five questions about it, re-address the one that mapped it with `SendMessage` instead of spawning a second.
+- **Reuse an agent when the follow-ups will keep coming.** If a subsystem is unfamiliar enough that you will ask five questions about it, re-address the one that mapped it with `SendMessage` instead of spawning a second.
 
 ## Write or merge
 
@@ -111,11 +111,11 @@ A question that turns out to be genuinely unsettled goes to `## Open questions`,
 
 ## The plan must stand on its own, and it must stay a page
 
-Write for a reader who was not here. `/impl` is meant to run in a fresh session — and now usually in a fresh worktree — so by the time the plan is executed everything said in this conversation is gone: the constraint mentioned in passing, the approach rejected, the file a scout found. The test is concrete: read each step as though you had just opened the repository and knew nothing else. Does it say what to change, where, and what "done" looks like? "Apply the same treatment to the other call sites" fails — which sites, and what treatment. Naming them costs a line and saves a round trip through the user. And `/impl` has no one to ask: any choice a reviewer or implementer might reasonably raise is either decided here under `## Decisions`, or it becomes a `## Divergences` entry chosen by the lead without you.
+Write for a reader who was not here. `/impl` is meant to run in a fresh session — and now usually in a fresh worktree — so by the time the plan is executed everything said in this conversation is gone: the constraint mentioned in passing, the approach rejected, the file an agent found. The test is concrete: read each step as though you had just opened the repository and knew nothing else. Does it say what to change, where, and what "done" looks like? "Apply the same treatment to the other call sites" fails — which sites, and what treatment. Naming them costs a line and saves a round trip through the user. And `/impl` has no one to ask: any choice a reviewer or implementer might reasonably raise is either decided here under `## Decisions`, or it becomes a `## Divergences` entry chosen by the lead without you.
 
 That pulls against length, and the resolution is that standing on its own means complete in its **conclusions**, not exhaustive in its reasoning: every constraint and decision the work depends on is written down, the argument that produced it is not, and a `path:line` pointer stands in for a paragraph of context. It matters because you rewrite this file on every turn of the conversation.
 
-- `## Context` holds conclusions and `path:line` pointers. Never pasted code, never a scout's report verbatim.
+- `## Context` holds conclusions and `path:line` pointers. Never pasted code, never an agent's report verbatim.
 - A settled decision is one line plus its reason.
 - When a section stops earning its space, cut it.
 
@@ -183,7 +183,7 @@ These are decisions, not fields to fill; satisfying the gate is never itself a r
 
 ### `Parallel:` is yours, and `/impl` can only narrow it
 
-Parallelisable means two steps touch disjoint files — a fact about the code. You scouted it, your steps already name the files they touch, and you have a human to ask. `/impl` has none of that: it may not read source, so its only evidence is what a member reports after it has already run, which is too late to schedule on. So you declare the groups and `/impl` is bound in one direction: it may **serialise** a group you declared parallel when a member reports a collision, and it may **never** parallelise steps you left sequential.
+Parallelisable means two steps touch disjoint files — a fact about the code. You researched it, your steps already name the files they touch, and you have a human to ask. `/impl` has none of that: it may not read source, so its only evidence is what a member reports after it has already run, which is too late to schedule on. So you declare the groups and `/impl` is bound in one direction: it may **serialise** a group you declared parallel when a member reports a collision, and it may **never** parallelise steps you left sequential.
 
 Err toward too much concurrency and nothing errors — one member's edit overwrites another's, or a commit captures a half-written tree, surfacing later as a broken commit nobody meant to make. That is why the call belongs in the file where the user can argue with it, and why `none` is a good answer whenever the steps genuinely share files.
 
@@ -197,7 +197,7 @@ Once `/pln` has run, the session is in planning mode, recorded in the file as `S
 - **Do not change the world.** The plan file and its commits in the plans repository are the only writes you make. No code edits, no new or modified files in the repository being planned for, no commands that mutate its state, and no branch or worktree — that is `/impl`'s first act, not yours. This binds your agents too: `Explore` is read-only by construction, and any other agent you spawn while planning must be told explicitly that it may not write. Delegating autonomy is autonomy over _method_, never over _scope_.
 - **A clarification often sounds like an order.** "Just add the flag to the parser" is the user telling you what the plan should say, not asking you to edit the parser. Write it down.
 - **If the user plainly wants work to start**, say the plan looks ready and point at `/oimpl` rather than starting. It is the normal way out: it validates the plan, makes the worktree, writes it into the plan and opens a session there for `/impl` to run in — so the work gets a fresh reader and its own branch without this conversation having to end first. (`/impl` run directly still works, and makes the branch itself; `/oimpl` is the path that does not require the user to set anything up.) One keystroke from them is cheaper than undoing edits they did not ask for.
-- **Trust the file over your memory.** Context drifts across a long session and this instruction fades with it. The plan survives a restart; your context and any named scout do not. When unsure whether planning mode still holds, read the `Status:` line.
+- **Trust the file over your memory.** Context drifts across a long session and this instruction fades with it. The plan survives a restart; your context and any named agent do not. When unsure whether planning mode still holds, read the `Status:` line.
 
 Only `/impl` leaves planning mode.
 
@@ -211,4 +211,4 @@ Step 10, and it has a shape. In a couple of lines, in your own words:
 - **the execution choices** — the `Team:`, `Parallel:`, `Checkpoints:` and `Verify:` you settled on, with the reason for the team's size and for any concurrency you declared;
 - **your answer to any `∫∫...?∫∫` question, in full.** It does not get compressed into "handled your question" — it is the thing they were waiting for.
 
-Relaying rules from `delegation.md` apply: a scout's report never reaches the user verbatim, and whatever mattered in it, you say.
+Relaying rules from `delegation.md` apply: an agent's report never reaches the user verbatim, and whatever mattered in it, you say.

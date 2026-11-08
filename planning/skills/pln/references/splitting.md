@@ -18,7 +18,7 @@ Splitting is cheap and merging is not. A new plan is a new file and a new issue 
 number, so two parts cost nothing structurally, while one lump costs on every turn it is
 read.
 
-So this is a test you run once, near the end — after scouting, before writing anything —
+So this is a test you run once, near the end — after research, before writing anything —
 not a preference for small deliverables.
 
 It fires on a merge as readily as on a new plan or a fresh set of issues. Splitting is
