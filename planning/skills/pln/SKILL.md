@@ -75,19 +75,13 @@ Surface at two moments only: when this call **created** the plan, and when the u
 
 ## You are the team lead, and the plan is yours
 
-The plan is your deliverable. You read it and write it yourself, in this session, never through an agent — it is a page, it is the thing the user is discussing with you, and a lead who does not hold it cannot answer "change step 3". What you delegate is everything that would bury the conversation: reading the codebase, running commands, and — once `/impl` takes over — the implementation itself. Read `../pln/references/delegation.md` before spawning anything; it governs here without exception.
+The plan is your deliverable. You read it and write it yourself, in this session, never through an agent — it is a page, it is the thing the user is discussing with you, and a lead who does not hold it cannot answer "change step 3". What you delegate is everything that would bury the conversation: reading the codebase, running commands. Read `../pln/references/delegation.md` before spawning anything; it governs here without exception.
 
-Planning is serial and convergent — you need each answer before you know the next question — so there is nothing here for a team to parallelize and no artifact to hand off. **No standing team while planning, no roles.** When a factual question arises that the conversation cannot answer, send a scout.
-
-That is about _this_ half. The work itself is always staffed by a team — but that team belongs to `/impl`, and sizing it is the one thing you do about it.
-
-## Investigate only when there is a real question
-
-A plan built on guesses about the codebase is worthless, but most `/pln` calls arrive at the end of a conversation that already established the facts, and re-deriving them spends the user's time to learn what you both already know. So investigation is conditional, not a phase: scout a specific open question — does this function exist, what calls it, how does this subsystem hang together — and skip it entirely when there isn't one.
+Planning converges on one document, and you hold it, so there are no roles and no standing team. Research is a different matter. When the plan rests on questions the conversation cannot answer, give them to agents, several at once when the questions are independent: two subsystems to map, competing approaches to check against the code, external docs to read. You keep the conversation; the agents do the reading.
 
 `delegation.md` covers naming, model routing and fan-out. What is specific to planning:
 
-- **One question per `Explore` agent.** An agent asked four things answers all four shallowly.
+- **One question per agent.** An agent asked four things answers all four shallowly.
 - **Ask for a verdict and `path:line` references, capped at a handful of lines.** Never ask for the code itself — if you want to see a file, ask a better question.
 - **Reuse a scout when the follow-ups will keep coming.** If a subsystem is unfamiliar enough that you will ask five questions about it, re-address the one that mapped it with `SendMessage` instead of spawning a second.
 
@@ -109,7 +103,7 @@ The user can write straight into the plan, wrapping anything they want handled i
 
 So read for those first, before folding in anything from the conversation. They are the most specific thing the user has said, and where they sit in the file is part of the message.
 
-Treat each one as a prompt — not a special kind of input with its own protocol, just the message the user would have typed in the chat, written where they were looking. Respond as you would to any prompt: do what is asked, push back when you think it is wrong, ask when it is unclear, and answer a question **in your reply** rather than quietly editing the plan to reflect a conclusion the user never read.
+Treat each one as a prompt: it is just the message the user would have typed in the chat, written where they were looking. Respond as you would to any prompt: do what is asked, push back when you think it is wrong, ask when it is unclear, and answer a question **in your reply** rather than quietly editing the plan to reflect a conclusion the user never read.
 
 What the file adds is bookkeeping. A marker is input, not plan content, so once you have dealt with it, it comes out. One still sitting there after you have written means it was not handled — never carry one forward silently, and never leave one for `/impl`, which has no conversation in which to ask and refuses to start while one stands.
 
