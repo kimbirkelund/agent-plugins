@@ -24,7 +24,7 @@ pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Migrate-Plan.ps1" \
     [-KeepSource] [-WhatIf]
 ```
 
-Run it from the repository root, never from this skill's directory. The script does all of it: derives the destination, rewrites the header, writes the file, commits the plans repository, and removes the original. It prints one JSON object — read that rather than re-deriving anything, and never move or rewrite a plan by hand.
+Run it from the session's working directory. The script does all of it: derives the destination, rewrites the header, writes the file, commits the plans repository, and removes the original. It prints one JSON object — read that rather than re-deriving anything, and never move or rewrite a plan by hand.
 
 What it changes is the header and the location, never the substance:
 

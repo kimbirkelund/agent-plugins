@@ -12,7 +12,7 @@ Capture what we have been discussing as issues in this repository's issue tracke
 ## Procedure
 
 1. **Is there something to file?** With no argument and a conversation that settled nothing, ask what to file and stop there.
-2. **Find the tracker.** Run `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Get-IssueContext.ps1"` from the repository root, never from this skill's directory. **Once per run, not once per issue** — it is a fact about the repository, and the answer cannot change while you draft. Act on `Tracker` and `CliAvailable` per _Finding the tracker_ below.
+2. **Find the tracker.** Run `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Get-IssueContext.ps1"` from the session's working directory. **Once per run, not once per issue** — it is a fact about the repository, and the answer cannot change while you draft. Act on `Tracker` and `CliAvailable` per _Finding the tracker_ below.
 3. **Harvest every `∫∫...∫∫` marker** in a draft you are revising, before folding in anything from the conversation. Drafts are normally revised in the session that wrote them, so the files are the ones in the scratchpad you already know; a later session has no record of them, so ask the user to point you at the draft file rather than going looking for it.
 4. **Scout**, but only for questions the conversation genuinely left open.
 5. **One issue or several.** Apply `../pln/references/splitting.md`. When it says split, propose the parts in your reply and wait — the user decides the boundaries before anything is written.

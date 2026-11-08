@@ -19,7 +19,7 @@ It is deliberately not `/impl` with a flag. `/impl` may still create the branch 
 
 ## Procedure
 
-1. **Find the plan.** With an argument, pass it as `-Plan` to `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Get-PlanContext.ps1"` from the repository root, never from this skill's directory; with none, run it bare. `selected` means the argument named the plan unambiguously — continue with it. `ambiguous` means several plans could be meant — list `Matches`' titles and statuses when an argument was passed, `Candidates`' otherwise, ask which, and stop. `no-match` means the argument matched no plan — say so, and stop. `none` means there is nothing to open; send the user to `/pln`. The argument only selects the plan: a request in it to use some other branch or worktree is not something this skill can honour, so say that and stop.
+1. **Find the plan.** With an argument, pass it as `-Plan` to `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Get-PlanContext.ps1"` from the session's working directory; with none, run it bare. `selected` means the argument named the plan unambiguously — continue with it. `ambiguous` means several plans could be meant — list `Matches`' titles and statuses when an argument was passed, `Candidates`' otherwise, ask which, and stop. `no-match` means the argument matched no plan — say so, and stop. `none` means there is nothing to open; send the user to `/pln`. The argument only selects the plan: a request in it to use some other branch or worktree is not something this skill can honour, so say that and stop.
 2. **Pre-flight the plan** — see below. On any failure, **create nothing** and stop.
 3. **Get the worktree**, either from the plan's existing `Branch:` line or from the worktree hook — see _Making the worktree_.
 4. **Attach it to the plan**: write `Branch:` into the header block and commit with `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Save-Plan.ps1" -Message "plan: branch for <title>"`. Nothing else in the plan changes — `Status:` stays `PLANNING` and `Base:` stays unwritten, because the run has not started.
@@ -45,7 +45,7 @@ On failure, say which check failed and what is missing — quoting each leftover
 
 ## Making the worktree
 
-Whether the work lands on an existing branch or a new one is decided by a script, never by your reading of the argument or the conversation. From the repository root, run `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Resolve-PlanBranch.ps1" -Plan <absolute plan path>`. It prints one JSON object with `Mode`, `Branch` and `Path`.
+Whether the work lands on an existing branch or a new one is decided by a script, never by your reading of the argument or the conversation. From the session's working directory, run `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Resolve-PlanBranch.ps1" -Plan <absolute plan path>`. It prints one JSON object with `Mode`, `Branch` and `Path`.
 
 **If the script throws**, report its message verbatim and stop. Remove nothing the hook created — the user decides what to do with it. Never work around the refusal by picking a branch yourself.
 
