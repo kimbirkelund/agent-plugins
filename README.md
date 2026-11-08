@@ -25,6 +25,9 @@ claude plugin validate ./planning                 # plugin manifest
 ./Update-ClaudePlugin.ps1 planning Minor          # bump, commit, push, refresh, update
 ```
 
+Formatting and linting run automatically as Claude Code hooks (`.claude/settings.json`, scripts in
+`Scripts/claude-hooks/`).
+
 `CLAUDE.md` carries the conventions: formatting, tests beside scripts, and why the version
 bump is the promote gesture.
 
