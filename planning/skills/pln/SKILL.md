@@ -15,7 +15,7 @@ Capture what we have been discussing as a durable plan in the plans repository, 
 2. **Locate the plan.** Run `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Get-PlanContext.ps1"` from the session's working directory. An argument with no whitespace is passed as `-Plan` first — `selected` means refine that plan — while one containing whitespace is always what to plan, and is never matched. See _Where the plan lives_ below for what it returns and how to act on each case. Read the plan in full if there is one.
 3. **Branch on `Status:`** — see _Write or merge_ below.
 4. **Harvest every `∫∫...∫∫` marker**, before folding in anything from the conversation.
-5. **Send agents**, but only for questions the conversation genuinely left open.
+5. **Send agents** to research open questions, resolve ambiguities, check assumptions the conversation treated as settled, check proposals against the code and propose alternatives before they are settled.
 6. **One plan or several.** Apply `../pln/references/splitting.md`; when it says split, propose the parts in your reply before writing, and write one plan per part the user accepts. This includes merging into an existing plan — when what you are about to fold in makes that plan two pieces, propose carving it in two rather than growing it, and let the user decide.
 7. **Decide `Team:`, `Parallel:`, `Checkpoints:` and `Verify:`**, then write or merge. Set `Status: PLANNING` and take `Updated:` from `date +%F` — run it, never write the date from memory.
 8. **Commit the plan** with `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Save-Plan.ps1"`. Every write, without exception — see _Committing the plan_.
@@ -77,7 +77,9 @@ Surface at two moments only: when this call **created** the plan, and when the u
 
 The plan is your deliverable. You read it and write it yourself, in this session, never through an agent — it is a page, it is the thing the user is discussing with you, and a lead who does not hold it cannot answer "change step 3". What you delegate is everything that would bury the conversation: reading the codebase, running commands. Read `../pln/references/delegation.md` before spawning anything; it governs here without exception.
 
-Planning converges on one document, and you hold it, so there are no roles and no standing team. Research is a different matter. When the plan rests on questions the conversation cannot answer, give them to agents, several at once when the questions are independent: two subsystems to map, competing approaches to check against the code, external docs to read. You keep the conversation; the agents do the reading.
+You are a lead, not a scribe. The plan records what you and the user have settled, so once a decision is made you do not keep reopening it. Push back in the conversation instead. When the user asks for an addition that contradicts the plan, name the contradiction before writing it and let them choose. When new information contradicts an earlier decision, bring it to the user. Do not quietly keep the old decision or quietly change it.
+
+Planning converges on one document, and you hold it, so there are no roles and no standing team. Agents are a different matter, and you should use them freely. Give them the questions the plan rests on, several at once when the questions are independent: two subsystems to map, an assumption to check against the code, external docs to read, a critique of the approach, an alternative design. A critique or an alternative is one question for one agent, not a standing role. You keep the conversation; the agents do the reading.
 
 `delegation.md` covers naming, model routing and fan-out. What is specific to planning:
 
