@@ -22,7 +22,7 @@
     ./Invoke-ProfilePowershellPesterTests.ps1 -Path ./gw.Tests.ps1 -Output Diagnostic
 #>
 [CmdletBinding()]
-PARAM(
+param(
     [string[]]$Path,
     [ValidateSet('None', 'Normal', 'Detailed', 'Diagnostic')]
     [string]$Output = 'Detailed'

@@ -16,27 +16,27 @@
     )
     Rules        = @{
         # preset = Allman, openBraceOnSameLine = false
-        PSPlaceOpenBrace                       = @{
+        PSPlaceOpenBrace                          = @{
             Enable             = $true
             OnSameLine         = $false
             NewLineAfter       = $true
             IgnoreOneLineBlock = $true
         }
-        PSPlaceCloseBrace                      = @{
+        PSPlaceCloseBrace                         = @{
             Enable             = $true
             NewLineAfter       = $true
             IgnoreOneLineBlock = $true
             NoEmptyLineBefore  = $false
         }
         # pipelineIndentationStyle = IncreaseIndentationForFirstPipeline
-        PSUseConsistentIndentation             = @{
+        PSUseConsistentIndentation                = @{
             Enable              = $true
             Kind                = 'space'
             IndentationSize     = 4
             PipelineIndentation = 'IncreaseIndentationForFirstPipeline'
         }
         # trimWhitespaceAroundPipe + whitespaceBetweenParameters
-        PSUseConsistentWhitespace              = @{
+        PSUseConsistentWhitespace                 = @{
             Enable                                  = $true
             CheckInnerBrace                         = $true
             CheckOpenBrace                          = $true
@@ -46,13 +46,19 @@
             CheckPipeForRedundantWhitespace         = $true
             CheckSeparator                          = $true
             CheckParameter                          = $true
+            # PSAlignAssignmentStatement pads '=' into columns inside hashtables. Without
+            # this, CheckOperator flags every padded '=' the formatter itself produced.
+            IgnoreAssignmentOperatorInsideHashTable = $true
         }
-        PSAlignAssignmentStatement             = @{
+        PSAlignAssignmentStatement                = @{
             Enable         = $true
             CheckHashtable = $true
+            # Enum members have no ignore switch in PSUseConsistentWhitespace, so aligning
+            # them would make the two rules disagree. Leave enums unaligned.
+            CheckEnums     = $false
         }
         # useCorrectCasing
-        PSUseCorrectCasing                     = @{
+        PSUseCorrectCasing                        = @{
             Enable = $true
         }
         # useConstantStrings
