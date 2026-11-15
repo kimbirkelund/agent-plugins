@@ -1,32 +1,45 @@
 <#
 .SYNOPSIS
-    Formats and lints files by extension. Shared dispatch for the Claude Code hooks.
+    Resolves paths, applies the skip rules and dispatches files by extension to the format scripts.
 .DESCRIPTION
-    PowerShell files are formatted with Invoke-Formatter and linted with Invoke-ScriptAnalyzer,
-    both using PSScriptAnalyzerSettings.psd1 from the repository root. Markdown, JSON and YAML
-    are formatted with prettier. Paths outside the repository, under .git/, or ignored by git
-    are skipped. A missing tool is silent success. Failures are printed on stdout and the
-    script exits 1; otherwise it exits 0.
+    Paths outside the repository, under .git/, missing, or ignored by git are skipped. The rest
+    are grouped by extension and each group goes, as absolute paths, to one call of the matching
+    script in Scripts/: Format-PowerShell.ps1 (.ps1 .psm1 .psd1), Format-Prettier.ps1 (.json
+    .jsonc .yml .yaml) or Format-Markdown.ps1 (.md). Unknown extensions are ignored. The stdout
+    of each script that exits 1 is printed and the script exits 1; otherwise it exits 0.
+    Warnings the scripts write to stderr are not part of the result.
 .PARAMETER Path
     Files to format. Relative paths resolve against RepoRoot.
 .PARAMETER RepoRoot
     Repository root. Defaults to two levels above this script.
+.PARAMETER ScriptRoot
+    Directory holding the Format-*.ps1 scripts. Defaults to one level above this script.
 #>
 [CmdletBinding()]
 param(
     [string[]]$Path,
-    [string]$RepoRoot = (Join-Path $PSScriptRoot '../..')
+    [string]$RepoRoot = (Join-Path $PSScriptRoot '../..'),
+    [string]$ScriptRoot = (Join-Path $PSScriptRoot '..')
 )
 
 $ErrorActionPreference = 'Stop'
 
 $root = [IO.Path]::GetFullPath($RepoRoot).TrimEnd('/', '\')
-$settings = Join-Path $root 'PSScriptAnalyzerSettings.psd1'
 $sep = [IO.Path]::DirectorySeparatorChar
 $failures = [System.Collections.Generic.List[string]]::new()
-$prettier = Get-Command prettier -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-$hasLinter = [bool](Get-Module -ListAvailable -Name PSScriptAnalyzer)
 
+$scriptByExtension = @{
+    '.ps1'   = 'Format-PowerShell.ps1'
+    '.psm1'  = 'Format-PowerShell.ps1'
+    '.psd1'  = 'Format-PowerShell.ps1'
+    '.json'  = 'Format-Prettier.ps1'
+    '.jsonc' = 'Format-Prettier.ps1'
+    '.yml'   = 'Format-Prettier.ps1'
+    '.yaml'  = 'Format-Prettier.ps1'
+    '.md'    = 'Format-Markdown.ps1'
+}
+
+$groups = [ordered]@{}
 foreach ($item in $Path)
 {
     if ([string]::IsNullOrWhiteSpace($item))
@@ -52,65 +65,36 @@ foreach ($item in $Path)
         continue
     }
 
-    switch ([IO.Path]::GetExtension($full).ToLowerInvariant())
+    $script = $scriptByExtension[[IO.Path]::GetExtension($full).ToLowerInvariant()]
+    if (-not $script)
     {
-        { $_ -in '.ps1', '.psm1', '.psd1' }
+        continue
+    }
+
+    if (-not $groups.Contains($script))
+    {
+        $groups[$script] = [System.Collections.Generic.List[string]]::new()
+    }
+
+    $groups[$script].Add($full)
+}
+
+foreach ($script in $groups.Keys)
+{
+    try
+    {
+        $output = & (Join-Path $ScriptRoot $script) -Path $groups[$script].ToArray() -RepoRoot $root 3>$null
+        if ($LASTEXITCODE -ne 0)
         {
-            if (-not $hasLinter -or -not (Test-Path -LiteralPath $settings))
+            foreach ($line in $output)
             {
-                break
-            }
-
-            try
-            {
-                $original = Get-Content -LiteralPath $full -Raw
-                if (-not [string]::IsNullOrEmpty($original))
-                {
-                    $formatted = Invoke-Formatter -ScriptDefinition $original -Settings $settings
-                    if ($formatted -cne $original)
-                    {
-                        # Get-Content strips a UTF-8 BOM and Set-Content would not restore it.
-                        $head = Get-Content -LiteralPath $full -AsByteStream -TotalCount 3
-                        $hasBom = $head.Count -eq 3 -and $head[0] -eq 0xEF -and $head[1] -eq 0xBB -and $head[2] -eq 0xBF
-                        $encoding = $hasBom ? 'utf8BOM' : 'utf8NoBOM'
-                        Set-Content -LiteralPath $full -Value $formatted -NoNewline -Encoding $encoding
-                    }
-                }
-            }
-            catch
-            {
-                $failures.Add("${relative}: format failed: $($_.Exception.Message)")
-                break
-            }
-
-            try
-            {
-                $findings = Invoke-ScriptAnalyzer -Path $full -Settings $settings -ExcludeRule PSUseConsistentWhitespace
-            }
-            catch
-            {
-                $failures.Add("${relative}: lint failed: $($_.Exception.Message)")
-                break
-            }
-
-            foreach ($finding in $findings)
-            {
-                $failures.Add("${relative}:$($finding.Line) $($finding.RuleName) $($finding.Message)")
+                $failures.Add([string]$line)
             }
         }
-        { $_ -in '.md', '.json', '.jsonc', '.yml', '.yaml' }
-        {
-            if (-not $prettier)
-            {
-                break
-            }
-
-            $output = & $prettier.Source --write $full 2>&1
-            if ($LASTEXITCODE -ne 0)
-            {
-                $failures.Add("${relative}: prettier failed`n$($output -join "`n")")
-            }
-        }
+    }
+    catch
+    {
+        $failures.Add("${script} failed: $($_.Exception.Message)")
     }
 }
 
