@@ -34,24 +34,36 @@ Validate before shipping: `claude plugin validate .` for the marketplace manifes
 Before considering any change complete, run the formatter **and** the linter for that
 file's language and fix what they report.
 
-| Language                            | Format                                                       | Lint                                                              |
-| ----------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------- |
-| PowerShell (`.ps1` `.psm1` `.psd1`) | `Invoke-Formatter -Settings ./PSScriptAnalyzerSettings.psd1` | `Invoke-ScriptAnalyzer -Settings ./PSScriptAnalyzerSettings.psd1` |
-| JSON / YAML / Markdown              | `prettier --write <file>`                                    | —                                                                 |
+| Language                                      | Script (in `Scripts/`)  | What it runs                                                                                                 |
+| --------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------ |
+| PowerShell (`.ps1` `.psm1` `.psd1`)           | `Format-PowerShell.ps1` | `Invoke-Formatter`, then `Invoke-ScriptAnalyzer`, both with `./PSScriptAnalyzerSettings.psd1`                |
+| JSON / YAML (`.json` `.jsonc` `.yml` `.yaml`) | `Format-Prettier.ps1`   | `prettier --write`                                                                                           |
+| Markdown (`.md`)                              | `Format-Markdown.ps1`   | `prettier --write`, `markdownlint-cli2 --fix`, `prettier --write`, then `markdownlint-cli2` for what is left |
+
+Each script takes `-Path` and `-RepoRoot`, formats in place, then lints. Findings go to
+stdout as `path:line rule message` and the script exits 1. `pwsh -File` cannot pass several
+values to `-Path`; call the script with `&` for that.
 
 - `PSScriptAnalyzerSettings.psd1` (repo root) is the source of truth for PowerShell style
   (Allman braces, 4-space indent, aligned assignments, correct casing). Format in place:
   `Set-Content $f (Invoke-Formatter -ScriptDefinition (Get-Content -Raw $f) -Settings ./PSScriptAnalyzerSettings.psd1) -NoNewline`
+- `.markdownlint.jsonc` (repo root) holds the markdownlint rules.
+- A disagreement between the formatter and the linter is a config bug: fix it in
+  `PSScriptAnalyzerSettings.psd1`, never leave it or work around it.
 
 The hooks in `.claude/settings.json` run this automatically after every Write/Edit and after
 each Bash call (`Scripts/claude-hooks/`: `Format-File.ps1` for edits, `Format-DirtyFiles.ps1`
-for shell changes, both through `Format-Path.ps1`). The manual commands above remain the
-fallback. The hook leaves out `PSUseConsistentWhitespace`, in line with the rule above, and a
-finding it does report comes back as a hook error. Files outside the repository, under
-`.git/` or git-ignored are skipped, and a missing `prettier` or PSScriptAnalyzer is silently
-tolerated. Under the current `PSScriptAnalyzerSettings.psd1` every rule in `IncludeRules` is
-fixable by the formatter, so no `.ps1` lint finding ever reaches Claude through the hook; the
-lint path only fires for a rule added that the formatter cannot fix.
+for shell changes, both through `Format-Path.ps1`). `Format-Path.ps1` resolves the paths,
+leaves out files outside the repository, under `.git/` or git-ignored, and hands the rest to
+the scripts above by extension. Run the scripts by hand when the hooks are not active.
+`Format-Path.ps1` is internal to the hooks: it resolves relative paths against `RepoRoot`,
+and by hand you use the per-type scripts, which resolve them against the current
+directory. The hook formats and lints exactly as the scripts do, with no rule added or excluded. A finding comes back to
+Claude as a hook error: a PowerShell parse error, any rule the formatter cannot fix, and any
+markdownlint rule `--fix` cannot fix. A problem with a rule is fixed in the config
+(`PSScriptAnalyzerSettings.psd1`, `.markdownlint.jsonc`), never worked around in a script. A
+missing `prettier`, PSScriptAnalyzer or `markdownlint-cli2`, an npm/npx failure, or a lint
+timeout is skipped silently.
 
 ## PowerShell scripts: never dot-source another script
 
