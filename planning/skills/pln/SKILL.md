@@ -1,136 +1,286 @@
 ---
 name: pln
-description: Create or update the plan for whatever is being discussed in the plans repository, then hold planning mode until /impl is run.
-argument-hint: "[what to plan, or a plan letter/name from /list-plns to refine — omit to plan what we've been discussing]"
+description:
+  Create or update the plan for whatever is being discussed in the plans
+  repository, then hold planning mode until /impl is run.
+argument-hint:
+  "[what to plan, or a plan letter/name from /list-plns to refine — omit to plan
+  what we've been discussing]"
 disable-model-invocation: true
 ---
 
 # Plan
 
-Capture what we have been discussing as a durable plan in the plans repository, then hold planning mode until the user runs `/impl`.
+Capture what we have been discussing as a durable plan in the plans repository,
+then hold planning mode until the user runs `/impl`.
 
 ## Procedure
 
-1. **Is there something to plan?** With no argument and a conversation that settled nothing, ask what to plan and stop there.
-2. **Locate the plan.** Run `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Get-PlanContext.ps1"` from the session's working directory. An argument with no whitespace is passed as `-Plan` first — `selected` means refine that plan — while one containing whitespace is always what to plan, and is never matched. See _Where the plan lives_ below for what it returns and how to act on each case. Read the plan in full if there is one.
+1. **Is there something to plan?** With no argument and a conversation that
+   settled nothing, ask what to plan and stop there.
+2. **Locate the plan.** Run
+   `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Get-PlanContext.ps1"` from the
+   session's working directory. An argument with no whitespace is passed as
+   `-Plan` first — `selected` means refine that plan — while one containing
+   whitespace is always what to plan, and is never matched. See _Where the plan
+   lives_ below for what it returns and how to act on each case. Read the plan
+   in full if there is one.
 3. **Branch on `Status:`** — see _Write or merge_ below.
-4. **Harvest every `∫∫...∫∫` marker**, before folding in anything from the conversation.
-5. **Send agents** to research open questions, resolve ambiguities, check assumptions the conversation treated as settled, check proposals against the code and propose alternatives before they are settled.
-6. **One plan or several.** Apply `../pln/references/splitting.md`; when it says split, propose the parts in your reply before writing, and write one plan per part the user accepts. This includes merging into an existing plan — when what you are about to fold in makes that plan two pieces, propose carving it in two rather than growing it, and let the user decide.
-7. **Decide `Team:`, `Parallel:`, `Checkpoints:` and `Verify:`**, then write or merge. Set `Status: PLANNING` and take `Updated:` from `date +%F` — run it, never write the date from memory.
-8. **Commit the plan** with `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Save-Plan.ps1"`. Every write, without exception — see _Committing the plan_.
-9. **Surface it** if this call created the plan, or if the user asked to see it — see _Surfacing the plan_.
-10. **Report** — what changed in the plan, what is still open, and which execution choices you made and why. Your answer to a `∫∫...?∫∫` question belongs here in full.
+4. **Harvest every `∫∫...∫∫` marker**, before folding in anything from the
+   conversation.
+5. **Send agents** to research open questions, resolve ambiguities, check
+   assumptions the conversation treated as settled, check proposals against the
+   code and propose alternatives before they are settled.
+6. **One plan or several.** Apply `../pln/references/splitting.md`; when it says
+   split, propose the parts in your reply before writing, and write one plan per
+   part the user accepts. This includes merging into an existing plan — when
+   what you are about to fold in makes that plan two pieces, propose carving it
+   in two rather than growing it, and let the user decide.
+7. **Decide `Team:`, `Parallel:`, `Checkpoints:` and `Verify:`**, then write or
+   merge. Set `Status: PLANNING` and take `Updated:` from `date +%F` — run it,
+   never write the date from memory.
+8. **Commit the plan** with
+   `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Save-Plan.ps1"`. Every write,
+   without exception — see _Committing the plan_.
+9. **Surface it** if this call created the plan, or if the user asked to see it
+   — see _Surfacing the plan_.
+10. **Report** — what changed in the plan, what is still open, and which
+    execution choices you made and why. Your answer to a `∫∫...?∫∫` question
+    belongs here in full.
 
 The rest of this file is why, and what each step involves.
 
 ## Why this exists
 
-The user wants a problem thought all the way through before any code moves. The failure mode this prevents is hearing "we should add X" and immediately editing files — which throws away the design conversation and forces the user to review a diff when they wanted to review an idea. Planning mode makes the plan the artifact under discussion.
+The user wants a problem thought all the way through before any code moves. The
+failure mode this prevents is hearing "we should add X" and immediately editing
+files — which throws away the design conversation and forces the user to review
+a diff when they wanted to review an idea. Planning mode makes the plan the
+artifact under discussion.
 
-Which means there has to be something to plan. Inventing a goal from thin air produces a plan the user then has to argue with, which is strictly worse than one question.
+Which means there has to be something to plan. Inventing a goal from thin air
+produces a plan the user then has to argue with, which is strictly worse than
+one question.
 
 ## Where the plan lives
 
-Plans live in their own git repository, one directory per repository they are about:
+Plans live in their own git repository, one directory per repository they are
+about:
 
 ```
 <plans repo>/<repo name>/<YYYY-MM-DD>-<slug>.md
 ```
 
-`Get-PlanContext.ps1` is the only thing that knows this layout — never derive a path yourself, and never guess at the plans repository's location. It prints one JSON object:
+`Get-PlanContext.ps1` is the only thing that knows this layout — never derive a
+path yourself, and never guess at the plans repository's location. It prints one
+JSON object:
 
-- **`PlanPath`** — the current plan, or `null`. **`PlanMatch`** says how it was decided:
-  - `selected` — the argument named this plan, unambiguously; refine it, and the "Write or merge" rules apply by its `Status:`.
-  - `branch` — a plan's `Branch:` line is the checked-out branch. Exact; this is the normal case once `/impl` has made a branch.
-  - `only-active` — no `Branch:` matched, and exactly one plan is `PLANNING` or `IMPLEMENTING`. The normal case while planning on the default branch.
-  - `ambiguous` — several plans could be meant. **Do not pick one.** List the candidates with their titles and statuses, ask which, and stop.
+- **`PlanPath`** — the current plan, or `null`. **`PlanMatch`** says how it was
+  decided:
+  - `selected` — the argument named this plan, unambiguously; refine it, and the
+    "Write or merge" rules apply by its `Status:`.
+  - `branch` — a plan's `Branch:` line is the checked-out branch. Exact; this is
+    the normal case once `/impl` has made a branch.
+  - `only-active` — no `Branch:` matched, and exactly one plan is `PLANNING` or
+    `IMPLEMENTING`. The normal case while planning on the default branch.
+  - `ambiguous` — several plans could be meant. **Do not pick one.** List the
+    candidates with their titles and statuses, ask which, and stop.
   - `none` — this repository has no plan yet, so you are writing the first one.
-  - `no-match` — the argument matched no plan; it is what to plan, exactly as today.
-- **`NewPlanPath`** — where a new plan goes. Only present when you pass `-Title "<the plan's title>"`, so pass it once you know the title and use what comes back verbatim. It is today's date plus a slug of the title, suffixed if that name is taken.
-- **`PlanDir`**, **`PlansRepo`**, **`RepoRoot`**, **`RepoName`**, **`Branch`** — the surrounding facts.
-- **`Surface`** and **`Worktree`** — the user's hooks, or absent. See _Surfacing the plan_; `Worktree` belongs to `/impl`.
+  - `no-match` — the argument matched no plan; it is what to plan, exactly as
+    today.
+- **`NewPlanPath`** — where a new plan goes. Only present when you pass
+  `-Title "<the plan's title>"`, so pass it once you know the title and use what
+  comes back verbatim. It is today's date plus a slug of the title, suffixed if
+  that name is taken.
+- **`PlanDir`**, **`PlansRepo`**, **`RepoRoot`**, **`RepoName`**, **`Branch`** —
+  the surrounding facts.
+- **`Surface`** and **`Worktree`** — the user's hooks, or absent. See _Surfacing
+  the plan_; `Worktree` belongs to `/impl`.
 
-A new plan is a new file, always. Nothing is ever overwritten to make room for different work, so `Status: DONE` is not an obstacle and two pieces of work in one repository are two files rather than a conflict.
+A new plan is a new file, always. Nothing is ever overwritten to make room for
+different work, so `Status: DONE` is not an obstacle and two pieces of work in
+one repository are two files rather than a conflict.
 
 ## Committing the plan
 
-**Every write to the plan is followed by `Save-Plan.ps1`.** It commits everything in the plans repository under a standard message, says so when there was nothing to commit, and never touches the repository being planned for.
+**Every write to the plan is followed by `Save-Plan.ps1`.** It commits
+everything in the plans repository under a standard message, says so when there
+was nothing to commit, and never touches the repository being planned for.
 
-This is what the plans repository buys, so it only works if it is unconditional. The history of a plan is the record of how the thinking moved — which decision came before which, what was reversed and when — and that record only exists if each state got its own commit. An uncommitted edit is a state that never happened, and batching several turns into one commit collapses exactly the sequence worth keeping.
+This is what the plans repository buys, so it only works if it is unconditional.
+The history of a plan is the record of how the thinking moved — which decision
+came before which, what was reversed and when — and that record only exists if
+each state got its own commit. An uncommitted edit is a state that never
+happened, and batching several turns into one commit collapses exactly the
+sequence worth keeping.
 
-It also means the repository the user is working in stays clean. The plan is no longer a permanently modified file in `git status`, which is what made the old convention wear on them.
+It also means the repository the user is working in stays clean. The plan is no
+longer a permanently modified file in `git status`, which is what made the old
+convention wear on them.
 
-Pass `-Message` when the default reads badly for what you just did — creating a plan, say, is worth `-Message "plan: <title>"`. Otherwise take the default and move on; the message is not the record here, the sequence is.
+Pass `-Message` when the default reads badly for what you just did — creating a
+plan, say, is worth `-Message "plan: <title>"`. Otherwise take the default and
+move on; the message is not the record here, the sequence is.
 
 ## Surfacing the plan
 
-The user may configure a hook that puts the plan in front of them — their editor, a pane, whatever they use. `Get-PlanContext.ps1` returns it as `Surface`:
+The user may configure a hook that puts the plan in front of them — their
+editor, a pane, whatever they use. `Get-PlanContext.ps1` returns it as
+`Surface`:
 
-- **`Surface.Skill`** — invoke that skill with the plan's absolute path as its argument.
-- **`Surface.Command`** — run it, with `{path}` replaced by the plan's absolute path.
-- **absent** — surface nothing, and say nothing about it. Not configured is a preference, not a problem to report.
+- **`Surface.Skill`** — invoke that skill with the plan's absolute path as its
+  argument.
+- **`Surface.Command`** — run it, with `{path}` replaced by the plan's absolute
+  path.
+- **absent** — surface nothing, and say nothing about it. Not configured is a
+  preference, not a problem to report.
 
-Surface at two moments only: when this call **created** the plan, and when the user **asks** to see it ("show me the plan"). Not on every revision — during a long planning conversation the user is reading your replies, and re-opening the file on each turn interrupts rather than helps.
+Surface at two moments only: when this call **created** the plan, and when the
+user **asks** to see it ("show me the plan"). Not on every revision — during a
+long planning conversation the user is reading your replies, and re-opening the
+file on each turn interrupts rather than helps.
 
 ## You are the team lead, and the plan is yours
 
-The plan is your deliverable. You read it and write it yourself, in this session, never through an agent — it is a page, it is the thing the user is discussing with you, and a lead who does not hold it cannot answer "change step 3". What you delegate is everything that would bury the conversation: reading the codebase, running commands. Read `../pln/references/delegation.md` before spawning anything; it governs here without exception.
+The plan is your deliverable. You read it and write it yourself, in this
+session, never through an agent — it is a page, it is the thing the user is
+discussing with you, and a lead who does not hold it cannot answer "change step
+3". What you delegate is everything that would bury the conversation: reading
+the codebase, running commands. Read `../pln/references/delegation.md` before
+spawning anything; it governs here without exception.
 
-You are a lead, not a scribe. The plan records what you and the user have settled, so once a decision is made you do not keep reopening it. Push back in the conversation instead. When the user asks for an addition that contradicts the plan, name the contradiction before writing it and let them choose. When new information contradicts an earlier decision, bring it to the user. Do not quietly keep the old decision or quietly change it.
+You are a lead, not a scribe. The plan records what you and the user have
+settled, so once a decision is made you do not keep reopening it. Push back in
+the conversation instead. When the user asks for an addition that contradicts
+the plan, name the contradiction before writing it and let them choose. When new
+information contradicts an earlier decision, bring it to the user. Do not
+quietly keep the old decision or quietly change it.
 
-Planning converges on one document, and you hold it, so there are no roles and no standing team. Agents are a different matter, and you should use them freely. Give them the questions the plan rests on, several at once when the questions are independent: two subsystems to map, an assumption to check against the code, external docs to read, a critique of the approach, an alternative design. A critique or an alternative is one question for one agent, not a standing role. You keep the conversation; the agents do the reading.
+Planning converges on one document, and you hold it, so there are no roles and
+no standing team. Agents are a different matter, and you should use them freely.
+Give them the questions the plan rests on, several at once when the questions
+are independent: two subsystems to map, an assumption to check against the code,
+external docs to read, a critique of the approach, an alternative design. A
+critique or an alternative is one question for one agent, not a standing role.
+You keep the conversation; the agents do the reading.
 
-`delegation.md` covers naming, model routing and fan-out. What is specific to planning:
+`delegation.md` covers naming, model routing and fan-out. What is specific to
+planning:
 
-- **One question per agent.** An agent asked four things answers all four shallowly.
-- **Ask for a verdict and `path:line` references, capped at a handful of lines.** Never ask for the code itself — if you want to see a file, ask a better question.
-- **Reuse an agent when the follow-ups will keep coming.** If a subsystem is unfamiliar enough that you will ask five questions about it, re-address the one that mapped it with `SendMessage` instead of spawning a second.
+- **One question per agent.** An agent asked four things answers all four
+  shallowly.
+- **Ask for a verdict and `path:line` references, capped at a handful of
+  lines.** Never ask for the code itself — if you want to see a file, ask a
+  better question.
+- **Reuse an agent when the follow-ups will keep coming.** If a subsystem is
+  unfamiliar enough that you will ask five questions about it, re-address the
+  one that mapped it with `SendMessage` instead of spawning a second.
 
 ## Write or merge
 
-Read any existing plan completely before touching it — merging means preserving what is still true. Then branch on what you found:
+Read any existing plan completely before touching it — merging means preserving
+what is still true. Then branch on what you found:
 
-- **No plan for this repository** — write it from the template below, at `NewPlanPath`.
-- **`Status: PLANNING`, same work** — revise in place. Rewrite only what actually moved, and when a decision is superseded say so rather than deleting it silently. Never regenerate the file from scratch: the wording already in there is deliberate, often the user's own.
-- **`Status: PLANNING`, different work** — this is a second plan, not a merge. Say that the existing plan is about something else, and write the new work to a new `NewPlanPath` rather than folding two pieces of work into one incoherent plan. Both stay `PLANNING`, so say in your reply which one you just wrote and that `/impl` will ask which to run.
-- **`Status: IMPLEMENTING`** — work is in flight. Revising is legitimate — it is what `/impl` does when a step meets reality — but set `Status:` back to `PLANNING`, **preserve the `Base:` and `Branch:` lines `/impl` wrote beside it, and the `## Divergences` section if it has one** (that sha is its `git rebase --autosquash` target, that branch is where the work is, that section is the record of what the run did differently from the plan, and rewriting the file is exactly how they get lost), and tell the user plainly that `/impl` will resume against a changed plan.
-- **`Status: DONE`** — that plan is spent and stays spent. New work gets a new file; an amendment to work that already landed is new work too. Ask which it is only when the distinction changes what you write, not as a formality — nothing is at risk of being overwritten.
+- **No plan for this repository** — write it from the template below, at
+  `NewPlanPath`.
+- **`Status: PLANNING`, same work** — revise in place. Rewrite only what
+  actually moved, and when a decision is superseded say so rather than deleting
+  it silently. Never regenerate the file from scratch: the wording already in
+  there is deliberate, often the user's own.
+- **`Status: PLANNING`, different work** — this is a second plan, not a merge.
+  Say that the existing plan is about something else, and write the new work to
+  a new `NewPlanPath` rather than folding two pieces of work into one incoherent
+  plan. Both stay `PLANNING`, so say in your reply which one you just wrote and
+  that `/impl` will ask which to run.
+- **`Status: IMPLEMENTING`** — work is in flight. Revising is legitimate — it is
+  what `/impl` does when a step meets reality — but set `Status:` back to
+  `PLANNING`, **preserve the `Base:` and `Branch:` lines `/impl` wrote beside
+  it, and the `## Divergences` section if it has one** (that sha is its
+  `git rebase --autosquash` target, that branch is where the work is, that
+  section is the record of what the run did differently from the plan, and
+  rewriting the file is exactly how they get lost), and tell the user plainly
+  that `/impl` will resume against a changed plan.
+- **`Status: DONE`** — that plan is spent and stays spent. New work gets a new
+  file; an amendment to work that already landed is new work too. Ask which it
+  is only when the distinction changes what you write, not as a formality —
+  nothing is at risk of being overwritten.
 
-Those cases are about work that was already written down. The other way one plan becomes two is that the work in front of you was never one piece: `../pln/references/splitting.md` carries the test for that, how to put the proposal to the user, and the rule that the boundaries are theirs to draw. Run it before you write, not after — a split proposed once the file exists costs a rewrite, and a split never proposed costs the user a plan they cannot finish in one go.
+Those cases are about work that was already written down. The other way one plan
+becomes two is that the work in front of you was never one piece:
+`../pln/references/splitting.md` carries the test for that, how to put the
+proposal to the user, and the rule that the boundaries are theirs to draw. Run
+it before you write, not after — a split proposed once the file exists costs a
+rewrite, and a split never proposed costs the user a plan they cannot finish in
+one go.
 
 ## Human input in the file: `∫∫...∫∫`
 
-The user can write straight into the plan, wrapping anything they want handled in `∫∫` on both sides — `∫∫why not reuse the existing parser here?∫∫`, `∫∫split this into two steps∫∫`. It is the same conversation moved into the margin, usually because pointing at the exact line is easier than describing where they mean.
+The user can write straight into the plan, wrapping anything they want handled
+in `∫∫` on both sides — `∫∫why not reuse the existing parser here?∫∫`,
+`∫∫split this into two steps∫∫`. It is the same conversation moved into the
+margin, usually because pointing at the exact line is easier than describing
+where they mean.
 
-So read for those first, before folding in anything from the conversation. They are the most specific thing the user has said, and where they sit in the file is part of the message.
+So read for those first, before folding in anything from the conversation. They
+are the most specific thing the user has said, and where they sit in the file is
+part of the message.
 
-Treat each one as a prompt: it is just the message the user would have typed in the chat, written where they were looking. Respond as you would to any prompt: do what is asked, push back when you think it is wrong, ask when it is unclear, and answer a question **in your reply** rather than quietly editing the plan to reflect a conclusion the user never read.
+Treat each one as a prompt: it is just the message the user would have typed in
+the chat, written where they were looking. Respond as you would to any prompt:
+do what is asked, push back when you think it is wrong, ask when it is unclear,
+and answer a question **in your reply** rather than quietly editing the plan to
+reflect a conclusion the user never read.
 
-What the file adds is bookkeeping. A marker is input, not plan content, so once you have dealt with it, it comes out. One still sitting there after you have written means it was not handled — never carry one forward silently, and never leave one for `/impl`, which has no conversation in which to ask and refuses to start while one stands.
+What the file adds is bookkeeping. A marker is input, not plan content, so once
+you have dealt with it, it comes out. One still sitting there after you have
+written means it was not handled — never carry one forward silently, and never
+leave one for `/impl`, which has no conversation in which to ask and refuses to
+start while one stands.
 
-A question that turns out to be genuinely unsettled goes to `## Open questions`, in your own words. That section blocks `/impl` too, so say in your reply that the plan is not runnable until it is settled rather than leaving the user to find out at the gate.
+A question that turns out to be genuinely unsettled goes to `## Open questions`,
+in your own words. That section blocks `/impl` too, so say in your reply that
+the plan is not runnable until it is settled rather than leaving the user to
+find out at the gate.
 
 ## The plan must stand on its own, and it must stay a page
 
-Write for a reader who was not here. `/impl` is meant to run in a fresh session — and now usually in a fresh worktree — so by the time the plan is executed everything said in this conversation is gone: the constraint mentioned in passing, the approach rejected, the file an agent found. The test is concrete: read each step as though you had just opened the repository and knew nothing else. Does it say what to change, where, and what "done" looks like? "Apply the same treatment to the other call sites" fails — which sites, and what treatment. Naming them costs a line and saves a round trip through the user. And `/impl` has no one to ask: any choice a reviewer or implementer might reasonably raise is either decided here under `## Decisions`, or it becomes a `## Divergences` entry chosen by the lead without you.
+Write for a reader who was not here. `/impl` is meant to run in a fresh session
+— and now usually in a fresh worktree — so by the time the plan is executed
+everything said in this conversation is gone: the constraint mentioned in
+passing, the approach rejected, the file an agent found. The test is concrete:
+read each step as though you had just opened the repository and knew nothing
+else. Does it say what to change, where, and what "done" looks like? "Apply the
+same treatment to the other call sites" fails — which sites, and what treatment.
+Naming them costs a line and saves a round trip through the user. And `/impl`
+has no one to ask: any choice a reviewer or implementer might reasonably raise
+is either decided here under `## Decisions`, or it becomes a `## Divergences`
+entry chosen by the lead without you.
 
-That pulls against length, and the resolution is that standing on its own means complete in its **conclusions**, not exhaustive in its reasoning: every constraint and decision the work depends on is written down, the argument that produced it is not, and a `path:line` pointer stands in for a paragraph of context. It matters because you rewrite this file on every turn of the conversation.
+That pulls against length, and the resolution is that standing on its own means
+complete in its **conclusions**, not exhaustive in its reasoning: every
+constraint and decision the work depends on is written down, the argument that
+produced it is not, and a `path:line` pointer stands in for a paragraph of
+context. It matters because you rewrite this file on every turn of the
+conversation.
 
-- `## Context` holds conclusions and `path:line` pointers. Never pasted code, never an agent's report verbatim.
+- `## Context` holds conclusions and `path:line` pointers. Never pasted code,
+  never an agent's report verbatim.
 - A settled decision is one line plus its reason.
 - When a section stops earning its space, cut it.
 
-A plan is still scaffolding with a known end — a working document, not documentation someone reads next year. What changed is where it ends: it is not deleted when the work lands, it is left `DONE` in the plans repository, where its history says how the thinking got there. That is a reason to keep it a page, not a reason to write it for posterity.
+A plan is still scaffolding with a known end — a working document, not
+documentation someone reads next year. What changed is where it ends: it is not
+deleted when the work lands, it is left `DONE` in the plans repository, where
+its history says how the thinking got there. That is a reason to keep it a page,
+not a reason to write it for posterity.
 
 ## Template
 
 ```markdown
 # Plan: <short title>
 
-Status: PLANNING
-Updated: <YYYY-MM-DD, from `date +%F`>
-Repo: <absolute path, from Get-PlanContext's RepoRoot>
+Status: PLANNING Updated: <YYYY-MM-DD, from `date +%F`> Repo: <absolute path,
+from Get-PlanContext's RepoRoot>
 
 ## Goal
 
@@ -143,22 +293,21 @@ Conclusions and `path:line` pointers only.
 
 ## Decisions
 
-Choices already settled, each with the reason. This is what stops the plan
-being re-litigated later.
+Choices already settled, each with the reason. This is what stops the plan being
+re-litigated later.
 
 ## Steps
 
-The work, as a numbered list, in order. `/impl` addresses steps by their
-number — `Parallel:`, a checkpoint rule, and an interrupted run's resume
-point all depend on it. Each step names the files it touches, which is
-what makes `Parallel:` decidable.
+The work, as a numbered list, in order. `/impl` addresses steps by their number
+— `Parallel:`, a checkpoint rule, and an interrupted run's resume point all
+depend on it. Each step names the files it touches, which is what makes
+`Parallel:` decidable.
 
 ## How to execute plan
 
-Team: <one member per subsystem, plus a verifier and a reviewer>
-Parallel: <step groups that may run at once, or `none`>
-Checkpoints: at end
-Verify: <command and observable outcome, or `none`>
+Team: <one member per subsystem, plus a verifier and a reviewer> Parallel: <step
+groups that may run at once, or `none`> Checkpoints: at end Verify: <command and
+observable outcome, or `none`>
 
 ## Open questions
 
@@ -168,38 +317,113 @@ anything stands here, so an entry is a blocker, not a note.
 
 ## The header block
 
-`Status:` and `Updated:` are yours on every write. `Repo:` is yours once, when you create the plan — the plan no longer sits inside the repository it is about, so the file has to say which one that is; take it from `RepoRoot`.
+`Status:` and `Updated:` are yours on every write. `Repo:` is yours once, when
+you create the plan — the plan no longer sits inside the repository it is about,
+so the file has to say which one that is; take it from `RepoRoot`.
 
-Two more lines appear later and are **not yours to write, only to preserve**: `Branch:`, the branch or worktree the work lands on, written by `/oimpl` or by `/impl` when it finds a plan without one; and `Base:`, the sha `/impl`'s fixup roll-up rebases against. Never write either yourself — you are planning on the default branch and there is no branch yet — and never drop them when revising a plan that is already in flight.
+Two more lines appear later and are **not yours to write, only to preserve**:
+`Branch:`, the branch or worktree the work lands on, written by `/oimpl` or by
+`/impl` when it finds a plan without one; and `Base:`, the sha `/impl`'s fixup
+roll-up rebases against. Never write either yourself — you are planning on the
+default branch and there is no branch yet — and never drop them when revising a
+plan that is already in flight.
 
 ## The `## How to execute plan` section
 
-This section is the contract with `/impl`, which refuses to start without it. It says how to move through the plan, never what the work is — that is `## Steps`. Read `../pln/references/execution.md`: it defines all four lines and the rules they bind `/impl` to. Four are required, and the gate validates all four:
+This section is the contract with `/impl`, which refuses to start without it. It
+says how to move through the plan, never what the work is — that is `## Steps`.
+Read `../pln/references/execution.md`: it defines all four lines and the rules
+they bind `/impl` to. Four are required, and the gate validates all four:
 
-- **`Team:`** — a list of member names. The work is always staffed by a team, so this is not a choice about _whether_, only about how large. One implementer per subsystem the steps touch, plus a verifier and a reviewer, capped by `delegation.md`'s fan-out limit. Floor of three, and the three roles never collapse into fewer — that independence is the only unbiased signal the run has.
-- **`Parallel:`** — step groups that may run at once, or `none`. Yours to declare; see below.
-- **`Checkpoints:`** — when to stop for the user. **Defaults to `at end`**; write `after each step` or a specific rule ("after step 3, then at end") only when the user asks to steer. The default is `at end` because `/impl` is meant to run unattended from the gate to `DONE`: a checkpoint nobody asked for pages a user who planned so they would not have to watch. The line stays the user's control, and `/impl` still follows it literally. A `Parallel:` group is atomic, so "each step" means each group.
-- **`Verify:`** — a command **and** the observable outcome that makes it a pass, or the literal `none`. `/impl` hangs its commit rhythm and its plan-is-spent test on this line, and hands it to a member with nothing else to go on: a command with no outcome leaves that member inventing a standard, an outcome with no command leaves it nothing to run. "Run the Pester suite; the step is done when it passes" converts straight into a delegated check; "make sure it's solid" does not. Write `none` when the work genuinely has nothing runnable to check — that makes the absence a decision the user can see and correct, where a missing line is just an oversight.
+- **`Team:`** — a list of member names. The work is always staffed by a team, so
+  this is not a choice about _whether_, only about how large. One implementer
+  per subsystem the steps touch, plus a verifier and a reviewer, capped by
+  `delegation.md`'s fan-out limit. Floor of three, and the three roles never
+  collapse into fewer — that independence is the only unbiased signal the run
+  has.
+- **`Parallel:`** — step groups that may run at once, or `none`. Yours to
+  declare; see below.
+- **`Checkpoints:`** — when to stop for the user. **Defaults to `at end`**;
+  write `after each step` or a specific rule ("after step 3, then at end") only
+  when the user asks to steer. The default is `at end` because `/impl` is meant
+  to run unattended from the gate to `DONE`: a checkpoint nobody asked for pages
+  a user who planned so they would not have to watch. The line stays the user's
+  control, and `/impl` still follows it literally. A `Parallel:` group is
+  atomic, so "each step" means each group.
+- **`Verify:`** — a command **and** the observable outcome that makes it a pass,
+  or the literal `none`. `/impl` hangs its commit rhythm and its plan-is-spent
+  test on this line, and hands it to a member with nothing else to go on: a
+  command with no outcome leaves that member inventing a standard, an outcome
+  with no command leaves it nothing to run. "Run the Pester suite; the step is
+  done when it passes" converts straight into a delegated check; "make sure it's
+  solid" does not. Write `none` when the work genuinely has nothing runnable to
+  check — that makes the absence a decision the user can see and correct, where
+  a missing line is just an oversight.
 
-These are decisions, not fields to fill; satisfying the gate is never itself a reason for what you wrote. Read all four off the work where you can — `Team:` by partitioning the steps by subsystem, `Parallel:` from which steps touch disjoint files, `Checkpoints:` from whether the user asked to steer, `Verify:` from whatever this repository already runs to prove a change — and ask the human when you genuinely cannot tell: whether the work is checkable at all, or whether concurrency is worth the coarser checkpoints it forces. Either way, say in your reply what you chose and why, or what answer you got.
+These are decisions, not fields to fill; satisfying the gate is never itself a
+reason for what you wrote. Read all four off the work where you can — `Team:` by
+partitioning the steps by subsystem, `Parallel:` from which steps touch disjoint
+files, `Checkpoints:` from whether the user asked to steer, `Verify:` from
+whatever this repository already runs to prove a change — and ask the human when
+you genuinely cannot tell: whether the work is checkable at all, or whether
+concurrency is worth the coarser checkpoints it forces. Either way, say in your
+reply what you chose and why, or what answer you got.
 
 ### `Parallel:` is yours, and `/impl` can only narrow it
 
-Parallelisable means two steps touch disjoint files — a fact about the code. You researched it, your steps already name the files they touch, and you have a human to ask. `/impl` has none of that: it may not read source, so its only evidence is what a member reports after it has already run, which is too late to schedule on. So you declare the groups and `/impl` is bound in one direction: it may **serialise** a group you declared parallel when a member reports a collision, and it may **never** parallelise steps you left sequential.
+Parallelisable means two steps touch disjoint files — a fact about the code. You
+researched it, your steps already name the files they touch, and you have a
+human to ask. `/impl` has none of that: it may not read source, so its only
+evidence is what a member reports after it has already run, which is too late to
+schedule on. So you declare the groups and `/impl` is bound in one direction: it
+may **serialise** a group you declared parallel when a member reports a
+collision, and it may **never** parallelise steps you left sequential.
 
-Err toward too much concurrency and nothing errors — one member's edit overwrites another's, or a commit captures a half-written tree, surfacing later as a broken commit nobody meant to make. That is why the call belongs in the file where the user can argue with it, and why `none` is a good answer whenever the steps genuinely share files.
+Err toward too much concurrency and nothing errors — one member's edit
+overwrites another's, or a commit captures a half-written tree, surfacing later
+as a broken commit nobody meant to make. That is why the call belongs in the
+file where the user can argue with it, and why `none` is a good answer whenever
+the steps genuinely share files.
 
-Two `/impl` defaults need no line in the plan: one commit per step after that step's verification, and review at natural seams during the work. Write a `Commits:` or `Review:` line **only** to override one, with the reason — an override without a reason reads later as an accident, and a restated default is noise. Failure has no override: the two-round retry bound in `../pln/references/execution.md` is the default and the only failure policy, so there is no `On failure:` line. Two things go the other way: `/impl` reaches for neither `fable` nor `isolation: "worktree"` on a silent plan, so name either on the step that needs it — and `fable` only with the user's agreement.
+Two `/impl` defaults need no line in the plan: one commit per step after that
+step's verification, and review at natural seams during the work. Write a
+`Commits:` or `Review:` line **only** to override one, with the reason — an
+override without a reason reads later as an accident, and a restated default is
+noise. Failure has no override: the two-round retry bound in
+`../pln/references/execution.md` is the default and the only failure policy, so
+there is no `On failure:` line. Two things go the other way: `/impl` reaches for
+neither `fable` nor `isolation: "worktree"` on a silent plan, so name either on
+the step that needs it — and `fable` only with the user's agreement.
 
 ## Planning mode
 
-Once `/pln` has run, the session is in planning mode, recorded in the file as `Status: PLANNING`. While it holds:
+Once `/pln` has run, the session is in planning mode, recorded in the file as
+`Status: PLANNING`. While it holds:
 
-- **Every user message is about the plan** — a clarification, a correction, or a question. Answer questions directly; fold clarifications into the plan.
-- **Do not change the world.** The plan file and its commits in the plans repository are the only writes you make. No code edits, no new or modified files in the repository being planned for, no commands that mutate its state, and no branch or worktree — that is `/impl`'s first act, not yours. This binds your agents too: `Explore` is read-only by construction, and any other agent you spawn while planning must be told explicitly that it may not write. Delegating autonomy is autonomy over _method_, never over _scope_.
-- **A clarification often sounds like an order.** "Just add the flag to the parser" is the user telling you what the plan should say, not asking you to edit the parser. Write it down.
-- **If the user plainly wants work to start**, say the plan looks ready and point at `/oimpl` rather than starting. It is the normal way out: it validates the plan, makes the worktree, writes it into the plan and opens a session there for `/impl` to run in — so the work gets a fresh reader and its own branch without this conversation having to end first. (`/impl` run directly still works, and makes the branch itself; `/oimpl` is the path that does not require the user to set anything up.) One keystroke from them is cheaper than undoing edits they did not ask for.
-- **Trust the file over your memory.** Context drifts across a long session and this instruction fades with it. The plan survives a restart; your context and any named agent do not. When unsure whether planning mode still holds, read the `Status:` line.
+- **Every user message is about the plan** — a clarification, a correction, or a
+  question. Answer questions directly; fold clarifications into the plan.
+- **Do not change the world.** The plan file and its commits in the plans
+  repository are the only writes you make. No code edits, no new or modified
+  files in the repository being planned for, no commands that mutate its state,
+  and no branch or worktree — that is `/impl`'s first act, not yours. This binds
+  your agents too: `Explore` is read-only by construction, and any other agent
+  you spawn while planning must be told explicitly that it may not write.
+  Delegating autonomy is autonomy over _method_, never over _scope_.
+- **A clarification often sounds like an order.** "Just add the flag to the
+  parser" is the user telling you what the plan should say, not asking you to
+  edit the parser. Write it down.
+- **If the user plainly wants work to start**, say the plan looks ready and
+  point at `/oimpl` rather than starting. It is the normal way out: it validates
+  the plan, makes the worktree, writes it into the plan and opens a session
+  there for `/impl` to run in — so the work gets a fresh reader and its own
+  branch without this conversation having to end first. (`/impl` run directly
+  still works, and makes the branch itself; `/oimpl` is the path that does not
+  require the user to set anything up.) One keystroke from them is cheaper than
+  undoing edits they did not ask for.
+- **Trust the file over your memory.** Context drifts across a long session and
+  this instruction fades with it. The plan survives a restart; your context and
+  any named agent do not. When unsure whether planning mode still holds, read
+  the `Status:` line.
 
 Only `/impl` leaves planning mode.
 
@@ -207,10 +431,18 @@ Only `/impl` leaves planning mode.
 
 Step 10, and it has a shape. In a couple of lines, in your own words:
 
-- **what changed in the plan** — the user should not have to diff the file to learn what you did;
-- **where it is**, on the call that created it: the plan's path, once. Not on every revision.
-- **what is still open** — anything under `## Open questions`, said plainly as a blocker on `/impl`;
-- **the execution choices** — the `Team:`, `Parallel:`, `Checkpoints:` and `Verify:` you settled on, with the reason for the team's size and for any concurrency you declared;
-- **your answer to any `∫∫...?∫∫` question, in full.** It does not get compressed into "handled your question" — it is the thing they were waiting for.
+- **what changed in the plan** — the user should not have to diff the file to
+  learn what you did;
+- **where it is**, on the call that created it: the plan's path, once. Not on
+  every revision.
+- **what is still open** — anything under `## Open questions`, said plainly as a
+  blocker on `/impl`;
+- **the execution choices** — the `Team:`, `Parallel:`, `Checkpoints:` and
+  `Verify:` you settled on, with the reason for the team's size and for any
+  concurrency you declared;
+- **your answer to any `∫∫...?∫∫` question, in full.** It does not get
+  compressed into "handled your question" — it is the thing they were waiting
+  for.
 
-Relaying rules from `delegation.md` apply: an agent's report never reaches the user verbatim, and whatever mattered in it, you say.
+Relaying rules from `delegation.md` apply: an agent's report never reaches the
+user verbatim, and whatever mattered in it, you say.
