@@ -43,7 +43,7 @@
     pwsh -File Migrate-Plan.ps1
 
 .EXAMPLE
-    pwsh -File Migrate-Plan.ps1 -PlanPath ~/code/safepilot/PLAN.md -KeepSource
+    pwsh -File Migrate-Plan.ps1 -PlanPath ~/code/my-project/PLAN.md -KeepSource
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
