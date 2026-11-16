@@ -1,0 +1,45 @@
+{
+  // markdownlint rules for our docs. Rules that only concern formatting
+  // prettier already owns are disabled here so the two tools don't fight;
+  // the semantic rules (heading structure, duplicate headings, bare URLs,
+  // broken link fragments) are what earn their keep.
+  "default": true,
+
+  // prettier owns wrapping via proseWrap: always + printWidth: 80. MD013 only
+  // reliably sees the first paragraph of a prettier-ignore'd admonition body
+  // (the part that lazily continues the !!! marker) — a blank line later in
+  // that body turns the rest into an indented code block, invisible to
+  // MD013 too; wrap that by hand and verify by measuring, not by eye.
+  "MD013": {
+    "line_length": 80, // keep in sync with printWidth in .prettierrc.json
+    "code_blocks": false, // fenced and 4-space-indented blocks alike are copied verbatim; wrapping changes them
+    "tables": false, // a cell has no line break; prettier owns table layout
+    "headings": false, // a heading is a single line, so there is no wrap
+  },
+  "MD012": false, // multiple-consecutive-blank-lines
+
+  // Docs legitimately embed raw HTML (admonitions, <details>, images).
+  "MD033": false, // no-inline-html
+
+  // Not every file is a document with a top-level H1 (nav snippets, templates).
+  "MD041": false, // first-line-heading
+
+  // Duplicate headings are fine as long as they are not siblings.
+  "MD024": { "siblings_only": true },
+
+  // Release notes and design docs paste plain output/config into fences where
+  // no language applies; requiring one adds noise without value.
+  "MD040": false, // fenced-code-language
+
+  // We don't standardise indented vs fenced code blocks; the "consistent"
+  // check just flips its expectation per file.
+  "MD046": false, // code-block-style
+
+  // Some bold-only lines are summaries ("Total requirements: 128"), not
+  // headings; forcing them into headings would misrepresent them.
+  "MD036": false, // no-emphasis-as-heading
+
+  // prettier owns thematic-break style (normalises to ---); MD035's
+  // consistency check just fights it.
+  "MD035": false, // hr-style
+}

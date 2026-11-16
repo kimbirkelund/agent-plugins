@@ -18,78 +18,86 @@ Plan-driven workflow. Seven commands and five scripts:
 <plans repo>/<repo name>/<YYYY-MM-DD>-<slug>.md
 ```
 
-One directory per repository, one file per plan, named from the date and a slug of the
-plan's title. The repository name comes from the origin remote where there is one, so
-every worktree of a repository plans into the same directory.
+One directory per repository, one file per plan, named from the date and a slug
+of the plan's title. The repository name comes from the origin remote where
+there is one, so every worktree of a repository plans into the same directory.
 
-`scripts/Get-PlanContext.ps1 -Plan <selector>` resolves a letter from `/list-plns`, a
-plan's file name, or a substring of its name or title, to one of these files.
+`scripts/Get-PlanContext.ps1 -Plan <selector>` resolves a letter from
+`/list-plns`, a plan's file name, or a substring of its name or title, to one of
+these files.
 
 Two consequences:
 
-- **The repository you are working in stays clean.** No permanently modified `PLAN.md` in
-  `git status`.
-- **Every write is committed**, so the plan's history is the record of how the thinking
-  moved, and several plans per repository cost nothing.
+- **The repository you are working in stays clean.** No permanently modified
+  `PLAN.md` in `git status`.
+- **Every write is committed**, so the plan's history is the record of how the
+  thinking moved, and several plans per repository cost nothing.
 
-`scripts/Get-PlanContext.ps1` is the only thing that knows the layout — it resolves the
-plans repository, decides which plan is current, and reads the configuration below.
-`scripts/Save-Plan.ps1` commits the plans repository under a standard message, holding a
-lock while it does and syncing with the remote from time to time (see below).
-`scripts/Migrate-Plan.ps1` moves a plan written under the old working-tree convention into
-that layout. `scripts/Get-PlanList.ps1` lists a repository's plans, filtered and ordered,
-with the per-plan counts `/list-plns` reports. `scripts/Resolve-PlanBranch.ps1` decides whether a plan lands on its own recorded branch or a fresh one, and refuses a branch another plan owns. The skills call them rather than deriving paths, and every script has Pester
-tests beside it.
+`scripts/Get-PlanContext.ps1` is the only thing that knows the layout — it
+resolves the plans repository, decides which plan is current, and reads the
+configuration below. `scripts/Save-Plan.ps1` commits the plans repository under
+a standard message, holding a lock while it does and syncing with the remote
+from time to time (see below). `scripts/Migrate-Plan.ps1` moves a plan written
+under the old working-tree convention into that layout.
+`scripts/Get-PlanList.ps1` lists a repository's plans, filtered and ordered,
+with the per-plan counts `/list-plns` reports. `scripts/Resolve-PlanBranch.ps1`
+decides whether a plan lands on its own recorded branch or a fresh one, and
+refuses a branch another plan owns. The skills call them rather than deriving
+paths, and every script has Pester tests beside it.
 
 ## Issues go to the repository's own tracker
 
-`/ipln` files into the tracker of the repository you are working in, so it has to know
-which one that is. `scripts/Get-IssueContext.ps1` is the only thing that decides, and it
-prints one JSON object with `Tracker`, the `Cli` that talks to it, `CliAvailable`, and the
-repository facts and `surface` hook it gets from `Get-PlanContext.ps1`. `/ipln` runs it
-once per invocation.
+`/ipln` files into the tracker of the repository you are working in, so it has
+to know which one that is. `scripts/Get-IssueContext.ps1` is the only thing that
+decides, and it prints one JSON object with `Tracker`, the `Cli` that talks to
+it, `CliAvailable`, and the repository facts and `surface` hook it gets from
+`Get-PlanContext.ps1`. `/ipln` runs it once per invocation.
 
 Detection is in order:
 
-1. **The host of the origin remote** — `github.com` (including hosts under it, such as
-   `ssh.github.com`) gives `github` and the `gh` CLI; `gitlab.com` gives `gitlab` and
-   `glab`.
-2. **The `issueTracker` key in the configuration below**, for a self-hosted instance whose
-   host name gives nothing away.
-3. **Otherwise `unknown`**, and `/ipln` asks you which tracker it is rather than guessing.
+1. **The host of the origin remote** — `github.com` (including hosts under it,
+   such as `ssh.github.com`) gives `github` and the `gh` CLI; `gitlab.com` gives
+   `gitlab` and `glab`.
+2. **The `issueTracker` key in the configuration below**, for a self-hosted
+   instance whose host name gives nothing away.
+3. **Otherwise `unknown`**, and `/ipln` asks you which tracker it is rather than
+   guessing.
 
-Drafts are files in the scratchpad, one per issue, put in front of you with the `surface`
-hook. Nothing is written into the repository and nothing is written into the plans
-repository — the issue is the durable record. Posting is a separate act that needs an
-explicit go-ahead after the drafts have been shown.
+Drafts are files in the scratchpad, one per issue, put in front of you with the
+`surface` hook. Nothing is written into the repository and nothing is written
+into the plans repository — the issue is the durable record. Posting is a
+separate act that needs an explicit go-ahead after the drafts have been shown.
 
 ## One writer at a time, and the remote
 
-Two sessions planning at once would race on one git index, so every `Save-Plan.ps1` run
-holds a lock for the whole of its git work: `.claude-plan.lock`, a directory, created with
-`mkdir` — the one filesystem operation that is atomic everywhere, because creating a
-directory that already exists fails rather than succeeding twice. The directory is left
-**empty**, which is also why it never reaches a commit: git does not track empty
+Two sessions planning at once would race on one git index, so every
+`Save-Plan.ps1` run holds a lock for the whole of its git work:
+`.claude-plan.lock`, a directory, created with `mkdir` — the one filesystem
+operation that is atomic everywhere, because creating a directory that already
+exists fails rather than succeeding twice. The directory is left **empty**,
+which is also why it never reaches a commit: git does not track empty
 directories, so the lock is invisible to `git add -A` and to `git status`.
 
-A lock older than `-StaleLockSeconds` (default 300) is assumed to belong to a session that
-died and is broken; the run reports `BrokeLock: true`. A live lock is waited on for
-`-LockTimeoutSeconds` (default 30) and then reported as a timeout.
+A lock older than `-StaleLockSeconds` (default 300) is assumed to belong to a
+session that died and is broken; the run reports `BrokeLock: true`. A live lock
+is waited on for `-LockTimeoutSeconds` (default 30) and then reported as a
+timeout.
 
-When the repository has an upstream, the run also pulls and pushes, at most once every
-`-SyncIntervalSeconds` (default 300). The last attempt is stamped in
-`.git/claude-plan-last-sync`, so every session on the machine shares one clock. Sync
-problems are **reported, never thrown** — a plan committed locally is already safe, and an
-unreachable remote is not a reason to fail the write, so the result carries
-`Sync.Problem` for the skill to relay. A pull that cannot be rebased cleanly is aborted, so
-the repository is never left mid-rebase. `-SyncNow` forces a sync, `-NoSync` skips the
-remote entirely, and no upstream means no sync at all.
+When the repository has an upstream, the run also pulls and pushes, at most once
+every `-SyncIntervalSeconds` (default 300). The last attempt is stamped in
+`.git/claude-plan-last-sync`, so every session on the machine shares one clock.
+Sync problems are **reported, never thrown** — a plan committed locally is
+already safe, and an unreachable remote is not a reason to fail the write, so
+the result carries `Sync.Problem` for the skill to relay. A pull that cannot be
+rebased cleanly is aborted, so the repository is never left mid-rebase.
+`-SyncNow` forces a sync, `-NoSync` skips the remote entirely, and no upstream
+means no sync at all.
 
 ## Configuration
 
 `$XDG_CONFIG_HOME/claude-planning/config.json`, falling back to
-`~/.config/claude-planning/config.json`. Every key is optional; the file itself is
-optional.
+`~/.config/claude-planning/config.json`. Every key is optional; the file itself
+is optional.
 
 ```json
 {
@@ -103,37 +111,39 @@ optional.
 
 ### `plansRepo`
 
-Where plans live. Defaults to `plans` under the code root (`$__CODE_ROOT`, else `~/code`).
-`$CLAUDE_PLANS_REPO` overrides both. A leading `~` is expanded. The repository is created
-and `git init`-ed on first use.
+Where plans live. Defaults to `plans` under the code root (`$__CODE_ROOT`, else
+`~/code`). `$CLAUDE_PLANS_REPO` overrides both. A leading `~` is expanded. The
+repository is created and `git init`-ed on first use.
 
 ### `issueTracker` — which tracker `/ipln` files into
 
-`github` or `gitlab`. Only consulted when the origin remote's host settles nothing, which
-in practice means a self-hosted instance: `git.example.com` is a GitLab to `glab` and a
-mystery to everyone else, and this key is where you say so. Anything else, or no key at
-all, leaves the tracker `unknown` and `/ipln` asks.
+`github` or `gitlab`. Only consulted when the origin remote's host settles
+nothing, which in practice means a self-hosted instance: `git.example.com` is a
+GitLab to `glab` and a mystery to everyone else, and this key is where you say
+so. Anything else, or no key at all, leaves the tracker `unknown` and `/ipln`
+asks.
 
 ### `surface` — how a plan is put in front of you
 
-Invoked when `/pln` **creates** a plan, and whenever you ask to see one. Not on every
-revision. `/ipln` uses the same hook for its issue drafts, and does surface those on every
-revision — they are the only copy there is.
+Invoked when `/pln` **creates** a plan, and whenever you ask to see one. Not on
+every revision. `/ipln` uses the same hook for its issue drafts, and does
+surface those on every revision — they are the only copy there is.
 
 ### `worktree` — how the branch or worktree for the work gets made
 
-Invoked by `/oimpl`, or by `/impl` when it is run directly on a plan that has no branch
-yet. What it returns is recorded as the plan's `Branch:` line, which is also how a later
-`/impl` finds the plan again. Two things are needed back: the branch name, which goes in
-the plan, and the worktree's absolute path, which goes to `session`. A command hook should
-print that path on stdout.
+Invoked by `/oimpl`, or by `/impl` when it is run directly on a plan that has no
+branch yet. What it returns is recorded as the plan's `Branch:` line, which is
+also how a later `/impl` finds the plan again. Two things are needed back: the
+branch name, which goes in the plan, and the worktree's absolute path, which
+goes to `session`. A command hook should print that path on stdout.
 
 ### `session` — how a new interactive session is opened
 
-Invoked by `/oimpl`, last, with the absolute path of the worktree it just made. Normally a
-terminal or multiplexer command, so it is expected to return immediately. Unlike the other
-two, an absent `session` hook **is** reported: `/oimpl` has set the work up but cannot open
-anything, so it prints the path and tells you to open a session there yourself.
+Invoked by `/oimpl`, last, with the absolute path of the worktree it just made.
+Normally a terminal or multiplexer command, so it is expected to return
+immediately. Unlike the other two, an absent `session` hook **is** reported:
+`/oimpl` has set the work up but cannot open anything, so it prints the path and
+tells you to open a session there yourself.
 
 ### Hook forms
 
@@ -145,14 +155,14 @@ Either hook takes a skill or a command:
   "surface":  "pwsh ... -Path '{path}'"
 ```
 
-- **`skill`** — the skill is invoked with the relevant argument. Right when the work needs
-  judgment: `new-branch-or-worktree` decides between a branch and a worktree from how the
-  repository is laid out, and owns the branch-name prefix.
-- **`command`** — run as a shell command. Deterministic, with an exit code. A bare string
-  is shorthand for this form.
+- **`skill`** — the skill is invoked with the relevant argument. Right when the
+  work needs judgment: `new-branch-or-worktree` decides between a branch and a
+  worktree from how the repository is laid out, and owns the branch-name prefix.
+- **`command`** — run as a shell command. Deterministic, with an exit code. A
+  bare string is shorthand for this form.
 - Both set: **`command` wins.**
-- Neither set, or the hook absent: the step is skipped silently. Not configured is a
-  preference, not a problem to report.
+- Neither set, or the hook absent: the step is skipped silently. Not configured
+  is a preference, not a problem to report.
 
 Placeholders:
 
@@ -165,33 +175,38 @@ Placeholders:
 ## Report gate hook
 
 `hooks/hooks.json` registers a `TeammateIdle` hook that runs
-`scripts/Invoke-ReportGate.ps1`. It enforces `/impl`'s output contract: a teammate must
-deliver its report by `SendMessage`, because a turn that ends in prose reaches nobody.
+`scripts/Invoke-ReportGate.ps1`. It enforces `/impl`'s output contract: a
+teammate must deliver its report by `SendMessage`, because a turn that ends in
+prose reaches nobody.
 
-When a teammate is about to go idle and has not sent a `SendMessage` since its last
-assignment, the hook exits 2 and feeds back a reminder to deliver the completion report to
-the lead. The hook gates every teammate, not only those spawned by `/impl`.
+When a teammate is about to go idle and has not sent a `SendMessage` since its
+last assignment, the hook exits 2 and feeds back a reminder to deliver the
+completion report to the lead. The hook gates every teammate, not only those
+spawned by `/impl`.
 
-- **Transcript** — the payload's `transcript_path` is the lead session's, not the
-  teammate's. The hook derives the teammate's transcript from it:
-  `<dir of transcript_path>/<session_id>/subagents/agent-<agent_id>.jsonl`. `agent_id` is
-  required; without it the hook cannot locate the teammate's transcript and exits 0. The
-  first entry of the derived file must carry an `agentId` equal to `agent_id`, otherwise the
-  file is not trusted and the hook exits 0.
-- **Cap** — at most 2 pushbacks per teammate per session. After the second, the hook gives
-  up, prints `ReportGateHook: <key> idled without a delivered report` and lets the teammate
-  idle. Later idles are silent.
-- **State** — counters live in `$CLAUDE_PLUGIN_DATA/report-gate/<session_id>.json`, keyed by
-  `<session_id>:<agent_id>`. When `CLAUDE_PLUGIN_DATA` is unset, the system
-  temp directory is used.
-- **Fail open** — a missing, unreadable or over-5 MB derived transcript, an `agentId`
-  mismatch, bad input, a payload without `session_id` or `agent_id`, or a state-file error
-  never blocks the teammate.
+- **Transcript** — the payload's `transcript_path` is the lead session's, not
+  the teammate's. The hook derives the teammate's transcript from it:
+  `<dir of transcript_path>/<session_id>/subagents/agent-<agent_id>.jsonl`.
+  `agent_id` is required; without it the hook cannot locate the teammate's
+  transcript and exits 0. The first entry of the derived file must carry an
+  `agentId` equal to `agent_id`, otherwise the file is not trusted and the hook
+  exits 0.
+- **Cap** — at most 2 pushbacks per teammate per session. After the second, the
+  hook gives up, prints `ReportGateHook: <key> idled without a delivered report`
+  and lets the teammate idle. Later idles are silent.
+- **State** — counters live in
+  `$CLAUDE_PLUGIN_DATA/report-gate/<session_id>.json`, keyed by
+  `<session_id>:<agent_id>`. When `CLAUDE_PLUGIN_DATA` is unset, the system temp
+  directory is used.
+- **Fail open** — a missing, unreadable or over-5 MB derived transcript, an
+  `agentId` mismatch, bad input, a payload without `session_id` or `agent_id`,
+  or a state-file error never blocks the teammate.
 - **Scope** — `TeammateIdle` fires only in agent-teams sessions
   (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`). Elsewhere the hook never runs.
 
 ## Shipping a change
 
-Bump `version` in `.claude-plugin/plugin.json` — `claude plugin update` compares nothing
-else, so an unbumped edit leaves the installed snapshot stale with no error.
-`../Update-ClaudePlugin.ps1 planning` does the bump, the commit and the update in one step.
+Bump `version` in `.claude-plugin/plugin.json` — `claude plugin update` compares
+nothing else, so an unbumped edit leaves the installed snapshot stale with no
+error. `../Update-ClaudePlugin.ps1 planning` does the bump, the commit and the
+update in one step.
