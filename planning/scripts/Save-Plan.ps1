@@ -33,6 +33,14 @@
     to fail the write. A pull that cannot be rebased cleanly is aborted, so the repository is
     never left mid-rebase.
 
+    Before the commit, the Markdown files that are part of it (added, modified or renamed)
+    are formatted with prettier, using plan.prettierrc.json beside this script and ignoring
+    any .editorconfig, so every plan is committed in one consistent shape whoever or
+    whatever wrote it. Line breaks in prose are preserved, so the header block and the
+    numbered steps keep their lines. Formatting never fails the save: a missing prettier or
+    a prettier that exits non-zero is reported in the output, and the save goes on: files
+    prettier managed to format are committed formatted, the rest as they were written.
+
 .PARAMETER PlansRepo
     Plans repository to commit. Resolved via Get-PlanContext.ps1 when omitted.
 
@@ -55,6 +63,9 @@
 
 .PARAMETER NoSync
     Commit locally and do not touch the remote at all.
+
+.PARAMETER NoFormat
+    Commit the plans as written and do not run prettier.
 
 .OUTPUTS
     One JSON object on stdout.
@@ -79,7 +90,9 @@ param(
 
     [switch]$SyncNow,
 
-    [switch]$NoSync
+    [switch]$NoSync,
+
+    [switch]$NoFormat
 )
 
 $ErrorActionPreference = 'Stop';
@@ -196,6 +209,69 @@ function Sync-PlansRepo
     return $result;
 }
 
+function Format-PlanFile
+{
+    param([string]$Repo, [string[]]$Files, [string]$Config, [switch]$Disabled)
+
+    $result = [pscustomobject]@{ Attempted = $false; Formatted = @(); Skipped = $null; Problem = $null }
+
+    if ($Disabled)
+    {
+        $result.Skipped = 'disabled';
+        return $result;
+    }
+
+    if (@($Files).Count -eq 0)
+    {
+        $result.Skipped = 'no markdown changes';
+        return $result;
+    }
+
+    $prettier = Get-Command prettier -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1;
+    if (-not $prettier)
+    {
+        $result.Skipped = 'prettier not found';
+        return $result;
+    }
+
+    $result.Attempted = $true;
+    try
+    {
+        $before = @{};
+        foreach ($file in $Files)
+        {
+            $before[$file] = [IO.File]::ReadAllBytes((Join-Path $Repo $file));
+        }
+
+        Push-Location -LiteralPath $Repo;
+        try
+        {
+            $output = & $prettier.Source --write --no-editorconfig --config $Config @Files 2>&1;
+            $exit = $LASTEXITCODE;
+        }
+        finally
+        {
+            Pop-Location;
+        }
+
+        if ($exit -ne 0)
+        {
+            $last = @($output | ForEach-Object { "$_" } | Where-Object { $_.Trim() }) | Select-Object -Last 1;
+            $result.Problem = "prettier exited $($exit): $last";
+        }
+
+        $result.Formatted = @($Files | Where-Object {
+                -not [System.Linq.Enumerable]::SequenceEqual([byte[]]$before[$_], [byte[]][IO.File]::ReadAllBytes((Join-Path $Repo $_)))
+            });
+    }
+    catch
+    {
+        $result.Problem = "prettier failed: $($_.Exception.Message)";
+    }
+
+    return $result;
+}
+
 if (-not $PlansRepo)
 {
     $context = & (Join-Path $PSScriptRoot 'Get-PlanContext.ps1') | ConvertFrom-Json;
@@ -219,6 +295,7 @@ $changed = @();
 $committed = $false;
 $commitSha = $null;
 $brokeLock = $false;
+$format = [pscustomobject]@{ Attempted = $false; Formatted = @(); Skipped = 'not attempted'; Problem = $null };
 $sync = [pscustomobject]@{ Attempted = $false; Pulled = $false; Pushed = $false; Skipped = 'not attempted'; Problem = $null };
 
 if ($PSCmdlet.ShouldProcess($PlansRepo, "commit `"$Message`""))
@@ -245,6 +322,17 @@ if ($PSCmdlet.ShouldProcess($PlansRepo, "commit `"$Message`""))
         if ($LASTEXITCODE -ne 0)
         {
             throw "git add failed in '$PlansRepo'.";
+        }
+
+        $markdown = @((@(git -C $PlansRepo diff --cached --name-only --diff-filter=AMR -z -- '*.md') -join "`n") -split "`0" | Where-Object { $_ });
+        $format = Format-PlanFile -Repo $PlansRepo -Files $markdown -Config (Join-Path $PSScriptRoot 'plan.prettierrc.json') -Disabled:$NoFormat;
+        if ($format.Attempted)
+        {
+            git -C $PlansRepo add -A;
+            if ($LASTEXITCODE -ne 0)
+            {
+                throw "git add failed in '$PlansRepo'.";
+            }
         }
 
         $changed = @(git -C $PlansRepo diff --cached --name-only | Where-Object { $_.Trim() });
@@ -284,5 +372,6 @@ if ($PSCmdlet.ShouldProcess($PlansRepo, "commit `"$Message`""))
     Message      = $Message
     ChangedFiles = $changed
     BrokeLock    = $brokeLock
+    Format       = $format
     Sync         = $sync
 } | ConvertTo-Json -Depth 3

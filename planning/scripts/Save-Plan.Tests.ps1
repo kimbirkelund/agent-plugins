@@ -1,5 +1,62 @@
+BeforeDiscovery {
+    $script:HasPrettier = [bool](Get-Command prettier -CommandType Application -ErrorAction SilentlyContinue)
+}
+
 BeforeAll {
     $script:ScriptPath = Join-Path $PSScriptRoot 'Save-Plan.ps1';
+
+    # Stub tools. Each call appends "name|cwd|arg|arg..." to STUB_LOG; prettier exits
+    # STUB_PRETTIER_RC and prints a line when that is non-zero.
+    function New-Stub
+    {
+        param([string[]]$Name)
+
+        $dir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $dir | Out-Null
+        $body = @'
+#!/bin/sh
+line="${0##*/}|$PWD"
+for a in "$@"; do line="$line|$a"; done
+printf '%s\n' "$line" >> "$STUB_LOG"
+if [ "${STUB_PRETTIER_RC:-0}" != 0 ]; then echo "prettier stub error" >&2; fi
+exit "${STUB_PRETTIER_RC:-0}"
+'@
+        foreach ($item in $Name)
+        {
+            $stub = Join-Path $dir $item
+            Set-Content $stub $body
+            chmod +x $stub
+        }
+
+        $dir
+    }
+
+    # Runs Save-Plan with PATH set to $PathValue and the stub environment in place.
+    function Invoke-SavePlan
+    {
+        param($Fixture, [string]$PathValue = $env:PATH, [hashtable]$Environment = @{}, [hashtable]$Extra = @{})
+
+        $saved = @{ PATH = $env:PATH }
+        $Environment['STUB_LOG'] = $script:StubLog
+        foreach ($name in $Environment.Keys)
+        {
+            $saved[$name] = [Environment]::GetEnvironmentVariable($name)
+            [Environment]::SetEnvironmentVariable($name, $Environment[$name])
+        }
+
+        $env:PATH = $PathValue
+        try
+        {
+            & $script:ScriptPath -PlansRepo $Fixture.PlansRepo -NoSync @Extra | ConvertFrom-Json
+        }
+        finally
+        {
+            foreach ($name in $saved.Keys)
+            {
+                [Environment]::SetEnvironmentVariable($name, $saved[$name])
+            }
+        }
+    }
 
     function New-Fixture
     {
@@ -377,6 +434,183 @@ Describe 'Save-Plan' {
             git -C $f.PlansRepo rev-parse --verify -q REBASE_HEAD 2>$null | Should -BeNullOrEmpty;
             Test-Path -LiteralPath (Join-Path $f.PlansRepo '.git/rebase-merge') | Should -BeFalse;
             Test-Path -LiteralPath $f.LockPath | Should -BeFalse;
+        }
+    }
+
+    Context 'formatting' {
+
+        BeforeEach {
+            $script:StubLog = Join-Path $TestDrive ([guid]::NewGuid().ToString('N') + '.log')
+            $script:ConfigPath = Join-Path $PSScriptRoot 'plan.prettierrc.json'
+        }
+
+        It 'runs prettier with the shipped config, only on the changed Markdown files' {
+            $f = New-Fixture -Existing;
+            Write-Plan $f -Name 'new.md';
+            Write-Plan $f -Name 'notes.txt';
+            $stub = New-Stub 'prettier';
+
+            $result = Invoke-SavePlan $f -PathValue ($stub + [IO.Path]::PathSeparator + $env:PATH);
+
+            $result.Committed | Should -BeTrue;
+            $calls = @(Get-Content -LiteralPath $script:StubLog);
+            $calls | Should -HaveCount 1;
+            $parts = $calls[0] -split '\|';
+            $parts[1] | Should -Be (Resolve-Path -LiteralPath $f.PlansRepo).Path;
+            $parts | Should -Contain '--no-editorconfig';
+            $parts[($parts.IndexOf('--config') + 1)] | Should -Be $script:ConfigPath;
+            $parts | Should -Contain 'widget/new.md';
+            $parts | Should -Not -Contain 'widget/seed.md';
+            $parts | Should -Not -Contain 'widget/notes.txt';
+            $result.Format.Attempted | Should -BeTrue;
+        }
+
+        It 'passes exact paths for odd names and renames, and never a deleted file' {
+            $f = New-Fixture -Existing;
+            Write-Plan $f -Name 'keep.md';
+            Write-Plan $f -Name 'gone.md';
+            Write-Plan $f -Name 'old name.md' -Content 'rename me, with enough text that git sees a rename';
+            git -C $f.PlansRepo add -A;
+            git -C $f.PlansRepo commit --quiet -m 'more plans';
+            Remove-Item -LiteralPath (Join-Path $f.PlanDir 'gone.md');
+            Move-Item -LiteralPath (Join-Path $f.PlanDir 'old name.md') -Destination (Join-Path $f.PlanDir 'renamed ø.md');
+            Write-Plan $f -Name 'my plan ø.md';
+            $stub = New-Stub 'prettier';
+
+            $result = Invoke-SavePlan $f -PathValue ($stub + [IO.Path]::PathSeparator + $env:PATH);
+
+            $result.Committed | Should -BeTrue;
+            $parts = (@(Get-Content -LiteralPath $script:StubLog) | Select-Object -First 1) -split '\|';
+            $parts | Should -Contain 'widget/my plan ø.md';
+            $parts | Should -Contain 'widget/renamed ø.md';
+            $parts | Should -Not -Contain 'widget/old name.md';
+            $parts | Should -Not -Contain 'widget/gone.md';
+            $parts | Should -Not -Contain 'widget/keep.md';
+        }
+
+        It 'does not call prettier with -NoFormat and reports disabled' {
+            $f = New-Fixture -Existing;
+            Write-Plan $f -Name 'new.md';
+            $stub = New-Stub 'prettier';
+
+            $result = Invoke-SavePlan $f -PathValue ($stub + [IO.Path]::PathSeparator + $env:PATH) -Extra @{ NoFormat = $true };
+
+            $result.Committed | Should -BeTrue;
+            $result.Format.Skipped | Should -Be 'disabled';
+            Test-Path -LiteralPath $script:StubLog | Should -BeFalse;
+        }
+
+        It 'reports no markdown changes and does not call prettier' {
+            $f = New-Fixture -Existing;
+            Write-Plan $f -Name 'notes.txt';
+            $stub = New-Stub 'prettier';
+
+            $result = Invoke-SavePlan $f -PathValue ($stub + [IO.Path]::PathSeparator + $env:PATH);
+
+            $result.Committed | Should -BeTrue;
+            $result.Format.Skipped | Should -Be 'no markdown changes';
+            Test-Path -LiteralPath $script:StubLog | Should -BeFalse;
+        }
+
+        It 'reports prettier not found and still commits' {
+            $f = New-Fixture -Existing;
+            Write-Plan $f -Name 'new.md';
+            $bin = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));
+            New-Item -ItemType Directory -Path $bin | Out-Null;
+            # Only git is reachable: the stub directory holds nothing called prettier.
+            $git = (Get-Command git -CommandType Application | Select-Object -First 1).Source;
+            New-Item -ItemType SymbolicLink -Path (Join-Path $bin 'git') -Target $git | Out-Null;
+
+            $result = Invoke-SavePlan $f -PathValue $bin;
+
+            $result.Committed | Should -BeTrue;
+            $result.Format.Skipped | Should -Be 'prettier not found';
+            $result.Format.Attempted | Should -BeFalse;
+        }
+
+        It 'reports a prettier failure and still commits' {
+            $f = New-Fixture -Existing;
+            Write-Plan $f -Name 'new.md';
+            $stub = New-Stub 'prettier';
+
+            $result = Invoke-SavePlan $f -PathValue ($stub + [IO.Path]::PathSeparator + $env:PATH) -Environment @{ STUB_PRETTIER_RC = '2' };
+
+            $result.Committed | Should -BeTrue;
+            $result.Format.Problem | Should -BeLike '*prettier stub error*';
+            git -C $f.PlansRepo status --porcelain | Should -BeNullOrEmpty;
+        }
+
+        It 'does not call prettier with -WhatIf' {
+            $f = New-Fixture -Existing;
+            Write-Plan $f -Name 'new.md';
+            $stub = New-Stub 'prettier';
+
+            $result = Invoke-SavePlan $f -PathValue ($stub + [IO.Path]::PathSeparator + $env:PATH) -Extra @{ WhatIf = $true };
+
+            Test-Path -LiteralPath $script:StubLog | Should -BeFalse;
+            $result.Format.Skipped | Should -Be 'not attempted';
+        }
+
+        Context 'with the real prettier' -Skip:(-not $script:HasPrettier) {
+
+            It 'commits a ragged plan formatted and lists it as formatted' {
+                $f = New-Fixture -Existing;
+                $content = "# Plan`n`n* one`n* two`n`n| a | b |`n|--|--|`n| longer cell | x |`n";
+                Write-Plan $f -Name 'new.md' -Content $content;
+
+                $result = Invoke-SavePlan $f;
+
+                $result.Committed | Should -BeTrue;
+                @($result.Format.Formatted) | Should -Contain 'widget/new.md';
+                $committed = git -C $f.PlansRepo show 'HEAD:widget/new.md' | Out-String;
+                $committed | Should -Match '- one';
+                $committed | Should -Match '\| a +\| b +\|';
+                git -C $f.PlansRepo status --porcelain | Should -BeNullOrEmpty;
+            }
+
+            It 'leaves an already formatted plan alone' {
+                $f = New-Fixture -Existing;
+                Write-Plan $f -Name 'new.md' -Content "# Plan`n`n- one";
+
+                $result = Invoke-SavePlan $f;
+
+                $result.Format.Attempted | Should -BeTrue;
+                @($result.Format.Formatted) | Should -HaveCount 0;
+            }
+
+            It 'keeps the header, steps and user input marker intact' {
+                $f = New-Fixture -Existing;
+                # Ambient config that would wrap prose and compact tables if it won over the
+                # shipped config.
+                $ambient = $f.PlansRepo;
+                '{"proseWrap":"always","printWidth":20}' | Set-Content -LiteralPath (Join-Path $ambient '.prettierrc.json');
+                "root = true`n[*]`nmax_line_length = 20`n" | Set-Content -LiteralPath (Join-Path $ambient '.editorconfig');
+                $d = [string]::new([char]0x222B, 2);
+                $marker = "<!-- user input $d`nfirst line`n`n  second   line`n$d -->";
+                $content = @(
+                    '# Plan: a plan', '',
+                    'Status: draft', 'Updated: 2026-11-18', 'Repo: widget', 'Branch: main', 'Base: main', '',
+                    '## How to execute plan', '',
+                    'Line one of how.', 'Line two of how.', 'Line three of how.', 'Line four of how.', '',
+                    '## Steps', '',
+                    '1. First step', '2. Second step', '',
+                    '| a | b |', '|--|--|', '| longer cell | x |', '', $marker, ''
+                ) -join "`n";
+                Write-Plan $f -Name 'new.md' -Content $content;
+
+                $result = Invoke-SavePlan $f;
+
+                $result.Committed | Should -BeTrue;
+                $lines = @(git -C $f.PlansRepo show 'HEAD:widget/new.md');
+                foreach ($line in 'Status: draft', 'Updated: 2026-11-18', 'Repo: widget', 'Branch: main', 'Base: main',
+                    'Line one of how.', 'Line two of how.', 'Line three of how.', 'Line four of how.',
+                    '1. First step', '2. Second step')
+                {
+                    $lines | Should -Contain $line;
+                }
+                $lines | Should -Contain '| a           | b   |';
+                (($lines -join "`n")).Contains($marker) | Should -BeTrue;
+            }
         }
     }
 }
