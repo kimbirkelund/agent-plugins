@@ -39,10 +39,11 @@ BeforeAll {
         }
     }
 
-    function Write-Plan($Fixture, [string]$Name, [string]$Title, [string]$Branch, [string]$Status = 'PLANNING')
+    function Write-Plan($Fixture, [string]$Name, [string]$Title, [string]$Branch, [string]$Status = 'PLANNING', [switch]$ListForm)
     {
-        $lines = @("# Plan: $Title", '', "Status: $Status");
-        if ($Branch) { $lines += "Branch: $Branch" }
+        $m = if ($ListForm) { '- ' } else { '' };
+        $lines = @("# Plan: $Title", '', "${m}Status: $Status");
+        if ($Branch) { $lines += "${m}Branch: $Branch" }
         $path = Join-Path $Fixture.PlanDir $Name;
         $lines | Set-Content -LiteralPath $path;
         return (Resolve-Path -LiteralPath $path).Path;
@@ -70,6 +71,15 @@ Describe 'Resolve-PlanBranch' {
     }
 
     Context 'without -Branch' {
+        It 'reads Branch from a list-form plan' {
+            $plan = Write-Plan $script:Fx 'l.md' 'Listed' 'main' -ListForm;
+
+            $r = Invoke-Resolve $script:Fx $plan;
+
+            $r.Mode | Should -Be 'existing';
+            $r.Branch | Should -Be 'main';
+        }
+
         It 'reports new when the plan has no Branch line' {
             $plan = Write-Plan $script:Fx 'a.md' 'Alpha' $null;
 

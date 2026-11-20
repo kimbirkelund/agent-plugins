@@ -7,6 +7,8 @@ BeforeAll {
             [string]$Status = 'DONE',
             [string]$Heading = '# Plan: rework the parser',
             [switch]$NoStatus,
+            [switch]$NoUpdated,
+            [switch]$ListForm,
             [switch]$NoPlan,
             [switch]$NoGit,
             [string]$Extra = ''
@@ -50,8 +52,10 @@ BeforeAll {
         if (-not $NoPlan)
         {
             $lines = @($Heading, '');
-            if (-not $NoStatus) { $lines += "Status: $Status" }
-            $lines += @('Updated: 2026-07-04', '', '## Goal', '', 'Make it work.', '');
+            $m = if ($ListForm) { '- ' } else { '' };
+            if (-not $NoStatus) { $lines += "${m}Status: $Status" }
+            if (-not $NoUpdated) { $lines += "${m}Updated: 2026-07-04" }
+            $lines += @('', '## Goal', '', 'Make it work.', '');
             if ($Extra) { $lines += $Extra }
             ($lines -join "`n") | Set-Content -LiteralPath $planPath -NoNewline;
             $f = Get-Item -LiteralPath $planPath;
@@ -164,9 +168,40 @@ Describe 'Migrate-Plan' {
             $f = New-Fixture;
             $result = Invoke-Migrate $f;
             $lines = @(Get-Content -LiteralPath $result.Destination);
-            $i = [array]::FindIndex($lines, [Predicate[string]] { $args[0] -like 'Updated:*' });
+            $i = [array]::FindIndex($lines, [Predicate[string]] { $args[0] -like '- Updated:*' });
 
-            $lines[$i + 1] | Should -Be "Repo: $($f.RepoRoot)";
+            # The bare header is converted to list form by the save that commits the plan.
+            $i | Should -BeGreaterThan -1;
+            $lines[$i + 1] | Should -Be "- Repo: $($f.RepoRoot)";
+        }
+
+        It 'inserts Repo as a list item after Updated in a list-form plan' {
+            $f = New-Fixture -ListForm;
+            $result = Invoke-Migrate $f;
+            $lines = @(Get-Content -LiteralPath $result.Destination);
+            $i = [array]::IndexOf($lines, '- Updated: 2026-07-04');
+
+            $result.Status | Should -Be 'DONE';
+            $i | Should -BeGreaterThan -1;
+            $lines[$i + 1] | Should -Be "- Repo: $($f.RepoRoot)";
+        }
+
+        It 'inserts Repo as a list item after Status when a list-form plan has no Updated' {
+            $f = New-Fixture -ListForm -NoUpdated;
+            $result = Invoke-Migrate $f;
+            $lines = @(Get-Content -LiteralPath $result.Destination);
+            $i = [array]::IndexOf($lines, '- Status: DONE');
+
+            $i | Should -BeGreaterThan -1;
+            $lines[$i + 1] | Should -Be "- Repo: $($f.RepoRoot)";
+        }
+
+        It 'leaves an existing list-form Repo line alone' {
+            $f = New-Fixture -ListForm -Extra '- Repo: /somewhere/else';
+            $result = Invoke-Migrate $f;
+            $text = Get-Content -Raw -LiteralPath $result.Destination;
+
+            ([regex]::Matches($text, '(?m)^(- )?Repo:')).Count | Should -Be 1;
         }
 
         It 'carries Status, Branch and Base across unchanged' {

@@ -86,12 +86,25 @@ function Measure-OpenQuestion([string[]]$Lines)
     # `none` under the heading is an answer, not an entry; the plan template's own prose is
     # not one either, but a plan that still carries it has not been written yet and the
     # count is moot.
-    $entries = @(Get-Section $Lines 'Open questions' |
-            Where-Object { $_.Trim() } |
-            Where-Object { $_.Trim() -notmatch '^<!--' } |
-            Where-Object { $_.Trim() -notmatch '^(none|n/a|-|—)\.?$' });
+    # An entry starts at a top-level list item, or at a non-indented line after a blank line or
+    # the heading; any other line continues the entry above, so a wrapped entry counts once.
+    $count = 0;
+    $afterBlank = $true;
+    foreach ($line in @(Get-Section $Lines 'Open questions'))
+    {
+        if (-not $line.Trim()) { $afterBlank = $true; continue }
 
-    return $entries.Count;
+        $starts = ($line -match '^(?:[-*+]|\d+\.)(?:\s|$)') -or ($afterBlank -and $line -match '^\S');
+        $afterBlank = $false;
+        if (-not $starts) { continue }
+
+        $first = $line.Trim();
+        if ($first -match '^<!--') { continue }
+        if ($first -match '^(?:none|n/a|-|—)\.?$') { continue }
+        $count++;
+    }
+
+    return $count;
 }
 
 function Get-PlanDetail([string]$PlanPath)

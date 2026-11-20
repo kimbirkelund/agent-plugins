@@ -45,8 +45,10 @@ What it changes is the header and the location, never the substance:
 - The file lands at `<plans repo>/<repo name>/<date>-<slug>.md`, **dated from
   when the plan was written** rather than from today, so the directory stays in
   the order the work happened. The slug comes from the plan's title.
-- A `Repo:` line is added. The file no longer sits in the repository it is
+- A `Repo:` field is added. The file no longer sits in the repository it is
   about, and nothing else records which one that is.
+- The header comes out as list items (`- Status: ...`) once saved, because the
+  save converts a bare header.
 - `Status:`, `Updated:`, and any `Branch:` or `Base:` lines carry over as they
   stand. A spent plan stays `DONE`; an interrupted one stays resumable, and
   `/impl` can pick it up from the plans repository exactly as it would have from

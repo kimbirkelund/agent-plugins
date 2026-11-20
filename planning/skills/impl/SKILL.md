@@ -32,7 +32,7 @@ Two references govern how:
 - `../pln/references/delegation.md` (paths relative to this skill's own
   directory) — choosing a member, writing its prompt, capping what comes back.
   Read it before spawning anything.
-- `../pln/references/execution.md` — the four lines `## How to execute plan`
+- `../pln/references/execution.md` — the four fields `## How to execute plan`
   must carry, the `Status:` values, the rules the team binds you to, and what it
   means that the run is unattended: the stop conditions, the judgement-call
   rule, the retry bound, the roll-up rule and the final report's shape.
@@ -57,7 +57,7 @@ nothing beside the code to open. Run
 `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Get-PlanContext.ps1"` and act on
 `PlanMatch`:
 
-- **`branch`** — a plan's `Branch:` line is the checked-out branch. This is the
+- **`branch`** — a plan's `Branch:` item is the checked-out branch. This is the
   resume case: you are in the worktree a previous run made.
 - **`only-active`** — one plan is `PLANNING` or `IMPLEMENTING` and no branch
   matched. The normal first run, on the default branch.
@@ -118,7 +118,7 @@ plan and check:
      identify the first step not recorded as landed, and tell the user what
      already landed, what is next, and whether any `fixup!` is still waiting to
      be rolled up. Then resume from there at the pacing `Checkpoints:` sets, on
-     the branch the plan's `Branch:` line names. If the notes are too thin to
+     the branch the plan's `Branch:` item names. If the notes are too thin to
      say where the work stopped, that is the failure to report — stop and say so
      rather than guessing which steps are already committed.
    - `DONE` — the plan is spent. Refuse and say so. The plan and its history
@@ -157,10 +157,10 @@ plan and check:
    so starting with one open means the run cannot finish. You have no
    conversation in which to settle it either. An empty section, or no section at
    all, passes.
-10. **If the plan has a `Branch:` line, it is the checked-out branch.** Run
+10. **If the plan has a `Branch:` item, it is the checked-out branch.** Run
     `git branch --show-current` and compare. A mismatch fails the gate: landing
     the work somewhere the plan does not claim splits the run across two
-    branches, and which one is right is not yours to guess. No `Branch:` line
+    branches, and which one is right is not yours to guess. No `Branch:` item
     passes; the next section makes one.
 
 On any failure: **stop.** Say which check failed and what is missing; on a
@@ -170,13 +170,13 @@ quote each one, since they are a line apiece and the user needs to see what is
 still open; on a branch mismatch, name both branches. Then send the user to
 `/pln` — except on a branch mismatch, where the plan is fine and the checkout is
 not: tell the user to check out the branch `Branch:` names, or to correct the
-`Branch:` line if the work really moved.
+`Branch:` item if the work really moved.
 
 Do not draft the missing section, do not have a member draft it, and do not
 start work on the grounds that the plan is mostly there. The gate is the whole
 point of the two-command split: a plan that does not say how to execute it means
 the user has not decided yet, and guessing at their intent spends their time
-worse than asking does. Because `/pln` always writes all four lines, a gate
+worse than asking does. Because `/pln` always writes all four fields, a gate
 failure other than a branch mismatch means the plan was hand-edited or written
 by something else — one `/pln` fixes it. A branch mismatch is about where this
 session is running, not about the plan, and `/pln` would not change it.
@@ -189,7 +189,7 @@ has one: `/oimpl` is the normal way this session was opened, and it made the
 worktree and wrote `Branch:` before starting you. This section is what happens
 when it did not — you were run directly.
 
-1. **If the plan already has a `Branch:` line**, the work already has a home —
+1. **If the plan already has a `Branch:` item**, the work already has a home —
    `/oimpl` made it, or a previous run did — and the gate has already confirmed
    it is the checked-out branch. Create nothing.
 2. **Otherwise invoke the user's worktree hook**, which `Get-PlanContext.ps1`
@@ -202,7 +202,9 @@ when it did not — you were run directly.
      root, `{name}` by the slug, and `{plan}` by the plan's absolute path.
    - **absent** — no hook is configured, so there is nothing to create. Say once
      that the work will land on the checked-out branch, and carry on there.
-3. **Record what came back** as `Branch:` in the plan's header block, after
+3. **Record what came back** as a `- Branch:` list item in the plan's header
+   list (in the bare form when the plan is still bare; the save converts it),
+   after
    `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Resolve-PlanBranch.ps1" -Plan <absolute plan path> -Branch <the branch the hook returned>`
    succeeds (with no hook, pass the checked-out branch from
    `git branch --show-current`) — if it throws, report its message verbatim and
@@ -218,13 +220,15 @@ work.
 
 Branch in place:
 
-1. Set `Status: IMPLEMENTING` in the plan, and, if it has no `Base:` yet, record
-   `Base: <sha>` from `git rev-parse HEAD` beside it, before the first commit.
-   An existing `Base:` stays as it is: it is the start of the commits already
-   landed, and replacing it would leave their fixups outside the rebase range.
-   Both lines are yours, no member needed. `Base:` is what makes the fixup
-   roll-up possible later: every `--fixup` target has to fall inside the rebase
-   range, and your context dies with the session while the file does not.
+1. Set `Status: IMPLEMENTING` in the plan's header list, and, if it has no
+   `Base:` yet, record a `- Base: <sha>` list item from `git rev-parse HEAD`
+   beside it, before the first commit. When the plan is still in the bare form,
+   write the new field bare too and let the save convert it. An existing `Base:`
+   stays as it is: it is the start of the commits already landed, and replacing
+   it would leave their fixups outside the rebase range. Both lines are yours,
+   no member needed. `Base:` is what makes the fixup roll-up possible later:
+   every `--fixup` target has to fall inside the rebase range, and your context
+   dies with the session while the file does not.
 2. **Follow `Checkpoints:` literally.** It outranks your instincts about pacing
    — if it says stop after each step, stop even when the next step looks
    trivial. The user wrote that line to control something, and stepping over it
@@ -242,7 +246,7 @@ Branch in place:
 
 **After every write to the plan, run
 `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Save-Plan.ps1"`.** Status changes,
-the `Branch:` and `Base:` lines, each progress note, each `## Divergences` entry
+the `Branch:` and `Base:` items, each progress note, each `## Divergences` entry
 — all of them.
 
 Two consequences worth being explicit about.
@@ -525,7 +529,7 @@ turned out to be published or the run broke mid-step, and either way the next
 session only learns it from this file. Your roster and your context die with the
 session; the file is all that survives it.
 
-The `Branch:` line is part of that. A fresh `/impl` started in the worktree
+The `Branch:` item is part of that. A fresh `/impl` started in the worktree
 finds this plan by that line, so a plan whose branch is recorded is a plan that
 can be resumed without the user explaining where the work went.
 

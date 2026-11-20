@@ -1,8 +1,9 @@
-BeforeDiscovery {
-    $script:HasPrettier = [bool](Get-Command prettier -CommandType Application -ErrorAction SilentlyContinue)
-}
-
 BeforeAll {
+    if (-not (Get-Command prettier -CommandType Application -ErrorAction SilentlyContinue))
+    {
+        throw 'prettier is required for these tests but was not found on PATH. Install it (npm install -g prettier).'
+    }
+
     $script:Script = Join-Path $PSScriptRoot 'Format-Prettier.ps1'
     $script:Pwsh = (Get-Command pwsh -CommandType Application | Select-Object -First 1).Source
 
@@ -48,7 +49,7 @@ Describe 'Format-Prettier' {
         New-Item -ItemType Directory -Path $script:Repo | Out-Null
     }
 
-    It 'rewrites an unformatted json file' -Skip:(-not $script:HasPrettier) {
+    It 'rewrites an unformatted json file' {
         $file = Join-Path $script:Repo 'a.json'
         Set-Content $file '{"a":1,"b":[1,2]}' -NoNewline
 
@@ -59,7 +60,7 @@ Describe 'Format-Prettier' {
         Get-Content $file -Raw | Should -Be "{ `"a`": 1, `"b`": [1, 2] }`n"
     }
 
-    It 'rewrites an unformatted yml file' -Skip:(-not $script:HasPrettier) {
+    It 'rewrites an unformatted yml file' {
         $file = Join-Path $script:Repo 'a.yml'
         Set-Content $file "a:   1`nb:    [1,2]`n" -NoNewline
 
@@ -69,7 +70,7 @@ Describe 'Format-Prettier' {
         Get-Content $file -Raw | Should -Be "a: 1`nb: [1, 2]`n"
     }
 
-    It 'reports invalid json with prettier output and exits 1' -Skip:(-not $script:HasPrettier) {
+    It 'reports invalid json with prettier output and exits 1' {
         Set-Content (Join-Path $script:Repo 'bad.json') '{"a":' -NoNewline
 
         $result = Invoke-FormatPrettier -Path 'bad.json'
@@ -79,14 +80,14 @@ Describe 'Format-Prettier' {
         $result.Output | Should -Match 'bad\.json'
     }
 
-    It 'warns about a missing file and exits 0' -Skip:(-not $script:HasPrettier) {
+    It 'warns about a missing file and exits 0' {
         $result = Invoke-FormatPrettier -Path 'nope.json'
 
         $result.ExitCode | Should -Be 0
         $result.Output | Should -Match 'Skipping missing file: nope\.json'
     }
 
-    It 'resolves a relative path against the current directory' -Skip:(-not $script:HasPrettier) {
+    It 'resolves a relative path against the current directory' {
         $sub = Join-Path $script:Repo 'sub'
         New-Item -ItemType Directory -Path $sub | Out-Null
         $file = Join-Path $sub 'c.json'

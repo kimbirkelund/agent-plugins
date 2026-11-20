@@ -19,8 +19,11 @@ Plan-driven workflow. Seven commands and five scripts:
 ```
 
 One directory per repository, one file per plan, named from the date and a slug
-of the plan's title. The repository name comes from the origin remote where
-there is one, so every worktree of a repository plans into the same directory.
+of the plan's title. Plans are wrapped at 80 columns on save, so each header
+field (`- Status: PLANNING`) and each `## How to execute plan` field is a list
+item, one per line; a plan in the old bare form is converted by the save. The
+repository name comes from the origin remote where there is one, so every
+worktree of a repository plans into the same directory.
 
 `scripts/Get-PlanContext.ps1 -Plan <selector>` resolves a letter from
 `/list-plns`, a plan's file name, or a substring of its name or title, to one of

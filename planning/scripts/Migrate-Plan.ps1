@@ -12,10 +12,12 @@
       - the file lands at <plans repo>/<repo name>/<date>-<slug>.md, dated from when the
         plan was written rather than from today, so the directory stays in the order the
         work happened;
-      - a `Repo:` line is added, because the file no longer sits in the repository it is
-        about and nothing else records which one that is;
-      - `Status:`, `Updated:`, and any `Branch:` or `Base:` lines are carried over as they
-        stand. A spent plan stays spent; an interrupted one stays resumable.
+      - a `Repo:` field is added, in the form of the line it follows (a list item after a
+        list item, a bare line after a bare line), because the file no longer sits in the
+        repository it is about and nothing else records which one that is;
+      - `Status:`, `Updated:`, and any `Branch:` or `Base:` header fields (list items, or
+        bare lines in an old plan) are carried over as they stand. A spent plan stays
+        spent; an interrupted one stays resumable.
 
     Everything below the header is copied verbatim, unconsumed `∫∫...∫∫` markers included —
     they are the user's own input and migrating is not the moment to answer them. The count
@@ -101,7 +103,7 @@ if ($planText -match '(?m)^#\s*Plan:\s*(.+?)\s*$') { $title = $Matches[1] }
 elseif ($planText -match '(?m)^#\s+(.+?)\s*$') { $title = $Matches[1] }
 else { $title = $planFile.BaseName }
 
-if ($planText -notmatch '(?m)^Status:\s*(\S+)')
+if ($planText -notmatch '(?m)^(?:[-*+][ \t]+)?Status:[ \t]*(\S+)')
 {
     throw "'$($planFile.FullName)' has no 'Status:' line, so it is not a plan this workflow wrote. Migrate it by hand.";
 }
@@ -119,16 +121,11 @@ $context = & (Join-Path $PSScriptRoot 'Get-PlanContext.ps1') -Path $repoRoot -Ti
 $destination = $context.NewPlanPath;
 
 $migrated = $planText;
-if ($migrated -notmatch '(?m)^Repo:\s*\S')
+if ($migrated -notmatch '(?m)^(?:[-*+][ \t]+)?Repo:[ \t]*\S')
 {
-    if ($migrated -match '(?m)^(Updated:.*)$')
-    {
-        $migrated = [regex]::Replace($migrated, '(?m)^(Updated:.*)$', "`$1`nRepo: $repoRoot", 1);
-    }
-    else
-    {
-        $migrated = [regex]::Replace($migrated, '(?m)^(Status:.*)$', "`$1`nRepo: $repoRoot", 1);
-    }
+    # The new line copies the list marker of the line it follows, so a list-form header stays one.
+    $anchor = if ($migrated -match '(?m)^(?:[-*+][ \t]+)?Updated:') { 'Updated' } else { 'Status' };
+    $migrated = [regex]::Replace($migrated, "(?m)^((?:[-*+][ \t]+)?)(${anchor}:.*)`$", "`${1}`$2`n`${1}Repo: $repoRoot", 1);
 }
 
 $markers = ([regex]::Matches($migrated, '∫∫')).Count / 2;

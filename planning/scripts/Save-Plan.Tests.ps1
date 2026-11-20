@@ -1,7 +1,3 @@
-BeforeDiscovery {
-    $script:HasPrettier = [bool](Get-Command prettier -CommandType Application -ErrorAction SilentlyContinue)
-}
-
 BeforeAll {
     $script:ScriptPath = Join-Path $PSScriptRoot 'Save-Plan.ps1';
 
@@ -121,6 +117,16 @@ exit "${STUB_PRETTIER_RC:-0}"
             LockPath  = Join-Path $plansRepo '.claude-plan.lock'
             StampPath = Join-Path $plansRepo '.git/claude-plan-last-sync'
         }
+    }
+
+    # A PATH holding only git, so prettier is not found.
+    function New-GitOnlyBin
+    {
+        $bin = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));
+        New-Item -ItemType Directory -Path $bin | Out-Null;
+        $git = (Get-Command git -CommandType Application | Select-Object -First 1).Source;
+        New-Item -ItemType SymbolicLink -Path (Join-Path $bin 'git') -Target $git | Out-Null;
+        $bin
     }
 
     function Write-Plan($Fixture, [string]$Name = 'plan.md', [string]$Content = '# Plan: a plan')
@@ -551,7 +557,138 @@ Describe 'Save-Plan' {
             $result.Format.Skipped | Should -Be 'not attempted';
         }
 
-        Context 'with the real prettier' -Skip:(-not $script:HasPrettier) {
+        Context 'plan header conversion without prettier' {
+
+            BeforeAll {
+                $script:OldPlan = @(
+                    '# Plan: a plan', '',
+                    'Status: draft', 'Updated: 2026-11-18', '',
+                    '## How to execute plan', '',
+                    'Team: a, b', 'Verify: run it', 'continued here', '',
+                    '```', 'Key: inside a fence', '```', '',
+                    '## Goal', '', 'Note: this is prose.', ''
+                ) -join "`n";
+            }
+
+            It 'commits an old-form plan with header and execute fields as list items' {
+                $f = New-Fixture -Existing;
+                Write-Plan $f -Name 'new.md' -Content $script:OldPlan;
+
+                $result = Invoke-SavePlan $f -PathValue (New-GitOnlyBin);
+
+                $result.Committed | Should -BeTrue;
+                $result.Format.Skipped | Should -Be 'prettier not found';
+                @($result.Format.Formatted) | Should -Contain 'widget/new.md';
+                $lines = @(git -C $f.PlansRepo show 'HEAD:widget/new.md');
+                foreach ($line in '- Status: draft', '- Updated: 2026-11-18', '- Team: a, b', '- Verify: run it', 'continued here', 'Key: inside a fence', 'Note: this is prose.')
+                {
+                    $lines | Should -Contain $line;
+                }
+            }
+
+            It 'leaves a Key line inside a fenced code block and a body paragraph alone' {
+                $f = New-Fixture -Existing;
+                Write-Plan $f -Name 'new.md' -Content $script:OldPlan;
+
+                Invoke-SavePlan $f -PathValue (New-GitOnlyBin) | Out-Null;
+
+                $text = git -C $f.PlansRepo show 'HEAD:widget/new.md' | Out-String;
+                $text | Should -Not -Match '- Key: inside';
+                $text | Should -Not -Match '- Note: ';
+            }
+
+            It 'commits a Markdown file that is not a plan unchanged' {
+                $f = New-Fixture -Existing;
+                $content = "# Notes`n`nStatus: draft`nUpdated: today`n";
+                Write-Plan $f -Name 'notes.md' -Content $content;
+
+                $result = Invoke-SavePlan $f -PathValue (New-GitOnlyBin);
+
+                (git -C $f.PlansRepo show 'HEAD:widget/notes.md' | Out-String).TrimEnd() | Should -Be $content.TrimEnd();
+                @($result.Format.Formatted) | Should -HaveCount 0;
+            }
+
+            It 'converts a second time without changing anything' {
+                $f = New-Fixture -Existing;
+                Write-Plan $f -Name 'new.md' -Content $script:OldPlan;
+                Invoke-SavePlan $f -PathValue (New-GitOnlyBin) | Out-Null;
+                $path = Join-Path $f.PlanDir 'new.md';
+                $once = Get-Content -Raw -LiteralPath $path;
+                # new.md must be staged again, or conversion never sees the converted text.
+                'a later body line' | Add-Content -LiteralPath $path;
+
+                $result = Invoke-SavePlan $f -PathValue (New-GitOnlyBin);
+
+                $result.Committed | Should -BeTrue;
+                @($result.Format.Formatted) | Should -HaveCount 0;
+                $text = Get-Content -Raw -LiteralPath $path;
+                $text | Should -Be ($once + "a later body line`n");
+                @($text -split "`r?`n" | Where-Object { $_ -match '^- - ' }) | Should -HaveCount 0;
+                $text | Should -BeLike '*- Status: draft*- Updated: 2026-11-18*- Team: a, b*- Verify: run it*';
+            }
+
+            It 'reports a file it cannot write, leaves it as it was and still commits' -Skip:($IsWindows -or ((id -u) -eq '0')) {
+                $f = New-Fixture -Existing;
+                Write-Plan $f -Name 'new.md' -Content $script:OldPlan;
+                $path = Join-Path $f.PlanDir 'new.md';
+                $before = Get-Content -Raw -LiteralPath $path;
+                chmod 444 $path;
+                try
+                {
+                    $result = Invoke-SavePlan $f -PathValue (New-GitOnlyBin);
+                }
+                finally
+                {
+                    chmod 644 $path;
+                }
+
+                $result.Committed | Should -BeTrue;
+                $result.Format.Problem | Should -BeLike "*plan header conversion failed for 'widget/new.md'*";
+                @($result.Format.Formatted) | Should -HaveCount 0;
+                Get-Content -Raw -LiteralPath $path | Should -Be $before;
+                (git -C $f.PlansRepo show 'HEAD:widget/new.md' | Out-String) | Should -Not -Match '- Status:';
+            }
+
+            It 'keeps CRLF line endings' {
+                $f = New-Fixture -Existing;
+                New-Item -ItemType Directory -Path $f.PlanDir -Force | Out-Null;
+                [IO.File]::WriteAllText((Join-Path $f.PlanDir 'new.md'), ($script:OldPlan -replace "`n", "`r`n"));
+
+                Invoke-SavePlan $f -PathValue (New-GitOnlyBin) | Out-Null;
+
+                $text = [IO.File]::ReadAllText((Join-Path $f.PlanDir 'new.md'));
+                $text | Should -BeLike "*- Status: draft`r`n*";
+                $text | Should -Not -Match "(?<!`r)`n";
+            }
+
+            It 'converts nothing with -NoFormat' {
+                $f = New-Fixture -Existing;
+                Write-Plan $f -Name 'new.md' -Content $script:OldPlan;
+
+                Invoke-SavePlan $f -PathValue (New-GitOnlyBin) -Extra @{ NoFormat = $true } | Out-Null;
+
+                $text = git -C $f.PlansRepo show 'HEAD:widget/new.md' | Out-String;
+                $text | Should -Not -Match '- Status:';
+            }
+
+            It 'converts nothing with -WhatIf' {
+                $f = New-Fixture -Existing;
+                Write-Plan $f -Name 'new.md' -Content $script:OldPlan;
+
+                Invoke-SavePlan $f -PathValue (New-GitOnlyBin) -Extra @{ WhatIf = $true } | Out-Null;
+
+                Get-Content -Raw -LiteralPath (Join-Path $f.PlanDir 'new.md') | Should -Not -Match '- Status:';
+            }
+        }
+
+        Context 'with the real prettier' {
+
+            BeforeAll {
+                if (-not (Get-Command prettier -CommandType Application -ErrorAction SilentlyContinue))
+                {
+                    throw 'prettier is required for these tests but was not found on PATH. Install it (npm install -g prettier).'
+                }
+            }
 
             It 'commits a ragged plan formatted and lists it as formatted' {
                 $f = New-Fixture -Existing;
@@ -578,38 +715,79 @@ Describe 'Save-Plan' {
                 @($result.Format.Formatted) | Should -HaveCount 0;
             }
 
-            It 'keeps the header, steps and user input marker intact' {
-                $f = New-Fixture -Existing;
-                # Ambient config that would wrap prose and compact tables if it won over the
-                # shipped config.
-                $ambient = $f.PlansRepo;
-                '{"proseWrap":"always","printWidth":20}' | Set-Content -LiteralPath (Join-Path $ambient '.prettierrc.json');
-                "root = true`n[*]`nmax_line_length = 20`n" | Set-Content -LiteralPath (Join-Path $ambient '.editorconfig');
+            BeforeAll {
                 $d = [string]::new([char]0x222B, 2);
-                $marker = "<!-- user input $d`nfirst line`n`n  second   line`n$d -->";
-                $content = @(
+                $script:Marker = "<!-- user input $d`nfirst line`n`n  second   line`n$d -->";
+                $script:Long = (1..40 | ForEach-Object { 'word' }) -join ' ';
+                $script:Short = (1..12 | ForEach-Object { 'word' }) -join ' ';
+                $script:RealPlan = @(
                     '# Plan: a plan', '',
                     'Status: draft', 'Updated: 2026-11-18', 'Repo: widget', 'Branch: main', 'Base: main', '',
                     '## How to execute plan', '',
-                    'Line one of how.', 'Line two of how.', 'Line three of how.', 'Line four of how.', '',
+                    'Team: a, b, c',
+                    'Verify: run the full Pester suite for the planning scripts and then',
+                    'read every failure message to the end before reporting',
+                    'Review: one reviewer',
+                    'Commit: one per step', '',
                     '## Steps', '',
                     '1. First step', '2. Second step', '',
-                    '| a | b |', '|--|--|', '| longer cell | x |', '', $marker, ''
+                    '## Goal', '', $script:Long, '', $script:Short, '',
+                    '| a | b |', '|--|--|', '| longer cell | x |', '', $script:Marker, ''
                 ) -join "`n";
-                Write-Plan $f -Name 'new.md' -Content $content;
+            }
+
+            It 'converts and wraps an old-form plan, keeping steps, table and marker' {
+                $f = New-Fixture -Existing;
+                # Ambient config that would wrap prose and compact tables if it won over the
+                # shipped config.
+                '{"proseWrap":"always","printWidth":20}' | Set-Content -LiteralPath (Join-Path $f.PlansRepo '.prettierrc.json');
+                "root = true`n[*]`nmax_line_length = 20`n" | Set-Content -LiteralPath (Join-Path $f.PlansRepo '.editorconfig');
+                Write-Plan $f -Name 'new.md' -Content $script:RealPlan;
 
                 $result = Invoke-SavePlan $f;
 
                 $result.Committed | Should -BeTrue;
-                $lines = @(git -C $f.PlansRepo show 'HEAD:widget/new.md');
-                foreach ($line in 'Status: draft', 'Updated: 2026-11-18', 'Repo: widget', 'Branch: main', 'Base: main',
-                    'Line one of how.', 'Line two of how.', 'Line three of how.', 'Line four of how.',
-                    '1. First step', '2. Second step')
+                $text = git -C $f.PlansRepo show 'HEAD:widget/new.md' | Out-String;
+                $lines = @($text -split "`r?`n");
+                foreach ($line in '- Status: draft', '- Updated: 2026-11-18', '- Repo: widget', '- Branch: main', '- Base: main',
+                    '- Team: a, b, c', '- Review: one reviewer', '- Commit: one per step',
+                    '1. First step', '2. Second step', '| a           | b   |', $script:Short)
                 {
                     $lines | Should -Contain $line;
                 }
-                $lines | Should -Contain '| a           | b   |';
-                (($lines -join "`n")).Contains($marker) | Should -BeTrue;
+                $v = [array]::FindIndex($lines, [Predicate[string]] { $args[0] -like '- Verify: *' });
+                $v | Should -BeGreaterThan -1;
+                $lines[$v + 1] | Should -Match '^  \S';
+                @($lines | Where-Object { $_.Length -gt 80 -and $_ -notmatch '^\|' }) | Should -HaveCount 0;
+                $text.Contains($script:Marker) | Should -BeTrue;
+            }
+
+            It 'reports only a one-word edit when the committed plan is saved again' {
+                $f = New-Fixture -Existing;
+                Write-Plan $f -Name 'new.md' -Content $script:RealPlan;
+                Invoke-SavePlan $f | Out-Null;
+                $path = Join-Path $f.PlanDir 'new.md';
+                (Get-Content -Raw -LiteralPath $path).Replace('Second step', 'Middle step') | Set-Content -LiteralPath $path -NoNewline;
+
+                $result = Invoke-SavePlan $f;
+
+                $result.Committed | Should -BeTrue;
+                @($result.Format.Formatted) | Should -HaveCount 0;
+                (git -C $f.PlansRepo diff --numstat HEAD~1 HEAD) | Should -Match '^1\s+1\s+widget/new.md$';
+            }
+
+            It 'reports nothing formatted for a plan already in list form and wrapped' {
+                $f = New-Fixture -Existing;
+                Write-Plan $f -Name 'first.md' -Content $script:RealPlan;
+                Invoke-SavePlan $f | Out-Null;
+                $formatted = Get-Content -Raw -LiteralPath (Join-Path $f.PlanDir 'first.md');
+                New-Item -ItemType Directory -Path $f.PlanDir -Force | Out-Null;
+                [IO.File]::WriteAllText((Join-Path $f.PlanDir 'second.md'), $formatted);
+
+                $result = Invoke-SavePlan $f;
+
+                $result.Format.Attempted | Should -BeTrue;
+                @($result.Format.Formatted) | Should -HaveCount 0;
             }
         }
     }

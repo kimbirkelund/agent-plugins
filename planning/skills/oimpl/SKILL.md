@@ -29,7 +29,7 @@ after which the planning conversation is free to end.
 It is deliberately not `/impl` with a flag. `/impl` may still create the branch
 itself when it finds a plan without one — running it directly in a worktree you
 made yourself has to keep working. `/oimpl` is the path for the normal case, and
-the two agree because both write the same `Branch:` line.
+the two agree because both write the same `Branch:` item.
 
 ## Procedure
 
@@ -45,10 +45,11 @@ the two agree because both write the same `Branch:` line.
    skill can honour, so say that and stop.
 2. **Pre-flight the plan** — see below. On any failure, **create nothing** and
    stop.
-3. **Get the worktree**, either from the plan's existing `Branch:` line or from
+3. **Get the worktree**, either from the plan's existing `Branch:` item or from
    the worktree hook — see _Making the worktree_.
-4. **Attach it to the plan**: write `Branch:` into the header block and commit
-   with
+4. **Attach it to the plan**: write `- Branch:` as a list item into the header
+   list (bare `Branch:` when the plan is still in the bare form; the save
+   converts it) and commit with
    `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Save-Plan.ps1" -Message "plan: branch for <title>"`.
    Nothing else in the plan changes — `Status:` stays `PLANNING` and `Base:`
    stays unwritten, because the run has not started.
@@ -65,7 +66,8 @@ by the `impl` skill; what this skill checks is the same list:
 
 - a recognised `Status:`;
 - a `## How to execute plan` section carrying all four of `Team:`, `Parallel:`,
-  `Checkpoints:` and `Verify:`, each satisfying its rule;
+  `Checkpoints:` and `Verify:`, each a list item (`- Team: ...`) or, in a plan
+  not yet saved in the new form, a bare line, and each satisfying its rule;
 - no unconsumed `∫∫...∫∫` markers;
 - nothing standing under `## Open questions`.
 
@@ -96,7 +98,7 @@ It prints one JSON object with `Mode`, `Branch` and `Path`.
 the hook created — the user decides what to do with it. Never work around the
 refusal by picking a branch yourself.
 
-**`existing`** — the plan already has a `Branch:` line, so the work already has
+**`existing`** — the plan already has a `Branch:` item, so the work already has
 a home. Use the script's `Branch` and `Path`. Create nothing.
 
 **`new`** — invoke the user's worktree hook, returned by `Get-PlanContext.ps1`
