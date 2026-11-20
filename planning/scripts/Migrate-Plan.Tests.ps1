@@ -168,9 +168,11 @@ Describe 'Migrate-Plan' {
             $f = New-Fixture;
             $result = Invoke-Migrate $f;
             $lines = @(Get-Content -LiteralPath $result.Destination);
-            $i = [array]::FindIndex($lines, [Predicate[string]] { $args[0] -like 'Updated:*' });
+            $i = [array]::FindIndex($lines, [Predicate[string]] { $args[0] -like '- Updated:*' });
 
-            $lines[$i + 1] | Should -Be "Repo: $($f.RepoRoot)";
+            # The bare header is converted to list form by the save that commits the plan.
+            $i | Should -BeGreaterThan -1;
+            $lines[$i + 1] | Should -Be "- Repo: $($f.RepoRoot)";
         }
 
         It 'inserts Repo as a list item after Updated in a list-form plan' {

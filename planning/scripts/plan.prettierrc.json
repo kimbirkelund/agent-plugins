@@ -1,3 +1,4 @@
 {
-  "proseWrap": "preserve"
+  "proseWrap": "always",
+  "printWidth": 80
 }

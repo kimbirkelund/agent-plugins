@@ -36,10 +36,13 @@
     Before the commit, the Markdown files that are part of it (added, modified or renamed)
     are formatted with prettier, using plan.prettierrc.json beside this script and ignoring
     any .editorconfig, so every plan is committed in one consistent shape whoever or
-    whatever wrote it. Line breaks in prose are preserved, so the header block and the
-    numbered steps keep their lines. Formatting never fails the save: a missing prettier or
-    a prettier that exits non-zero is reported in the output, and the save goes on: files
-    prettier managed to format are committed formatted, the rest as they were written.
+    whatever wrote it. Prose is wrapped at 80 columns. The header fields and the four
+    `## How to execute plan` fields are list items, one per line, so wrapping cannot join
+    them; a plan written in the old form (bare `Key: value` lines) is converted to list
+    items by the save that commits it. That conversion is plain text work and does not need
+    prettier. Formatting never fails the save: a missing prettier or a prettier that exits
+    non-zero is reported in the output, and the save goes on: files prettier managed to
+    format are committed formatted, the rest as they were written.
 
 .PARAMETER PlansRepo
     Plans repository to commit. Resolved via Get-PlanContext.ps1 when omitted.
@@ -209,6 +212,75 @@ function Sync-PlansRepo
     return $result;
 }
 
+function Convert-PlanHeader
+{
+    # Puts `- ` before the bare `Key: value` lines in a plan's header block and in its
+    # `## How to execute plan` section. Never throws: returns one message per file it could
+    # not read or write, and leaves that file as it was.
+    param([string]$Repo, [string[]]$Files)
+
+    $problems = @();
+    foreach ($file in $Files)
+    {
+        try
+        {
+            $path = Join-Path $Repo $file;
+            $bytes = [IO.File]::ReadAllBytes($path);
+            $bom = ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF);
+            $text = [Text.UTF8Encoding]::new($false).GetString($bytes, $(if ($bom) { 3 } else { 0 }), $bytes.Length - $(if ($bom) { 3 } else { 0 }));
+
+            # Lines keep their own terminators, so CRLF and LF files come back as they were.
+            $lines = [regex]::Split($text, '(?<=\n)');
+            if ($lines.Count -eq 0 -or $lines[0] -notmatch '^#\s*Plan:') { continue }
+
+            $region = 'header';
+            $fence = $null;
+            $edited = $false;
+            for ($i = 1; $i -lt $lines.Count; $i++)
+            {
+                $body = $lines[$i] -replace '\r?\n$', '';
+
+                if ($fence)
+                {
+                    if ($body -match '^\s{0,3}(`{3,}|~{3,})\s*$' -and $Matches[1][0] -eq $fence[0] -and $Matches[1].Length -ge $fence.Length) { $fence = $null }
+                    continue;
+                }
+
+                if ($body -match '^\s{0,3}(`{3,}|~{3,})')
+                {
+                    $fence = $Matches[1];
+                    continue;
+                }
+
+                if ($body -match '^## ')
+                {
+                    $region = if ($body -match '^##\s+How to execute plan\s*$') { 'execute' } else { $null };
+                    continue;
+                }
+
+                if ($region -and $body -match '^[A-Z][A-Za-z]*:(\s|$)')
+                {
+                    $lines[$i] = "- $($lines[$i])";
+                    $edited = $true;
+                }
+            }
+
+            if ($edited)
+            {
+                $out = [Text.UTF8Encoding]::new($false).GetBytes(($lines -join ''));
+                if ($bom) { $out = [byte[]]@(0xEF, 0xBB, 0xBF) + $out }
+                [IO.File]::WriteAllBytes($path, $out);
+            }
+        }
+        catch
+        {
+            $problems += "plan header conversion failed for '$file': $($_.Exception.Message)";
+        }
+    }
+
+    return $problems;
+}
+
 function Format-PlanFile
 {
     param([string]$Repo, [string[]]$Files, [string]$Config, [switch]$Disabled)
@@ -227,22 +299,37 @@ function Format-PlanFile
         return $result;
     }
 
+    # The "before" bytes come first, so Formatted covers the header conversion too.
+    $before = @{};
+    foreach ($file in $Files)
+    {
+        try { $before[$file] = [IO.File]::ReadAllBytes((Join-Path $Repo $file)) }
+        catch { $before[$file] = $null }
+    }
+
+    $convertProblems = @(Convert-PlanHeader -Repo $Repo -Files $Files);
+    if ($convertProblems.Count -gt 0) { $result.Problem = $convertProblems -join '; ' }
+
+    $changedFiles = {
+        @($Files | Where-Object {
+                $was = $before[$_];
+                if ($null -eq $was) { return $false }
+                try { -not [System.Linq.Enumerable]::SequenceEqual([byte[]]$was, [byte[]][IO.File]::ReadAllBytes((Join-Path $Repo $_))) }
+                catch { $false }
+            })
+    };
+
     $prettier = Get-Command prettier -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1;
     if (-not $prettier)
     {
         $result.Skipped = 'prettier not found';
+        $result.Formatted = @(& $changedFiles);
         return $result;
     }
 
     $result.Attempted = $true;
     try
     {
-        $before = @{};
-        foreach ($file in $Files)
-        {
-            $before[$file] = [IO.File]::ReadAllBytes((Join-Path $Repo $file));
-        }
-
         Push-Location -LiteralPath $Repo;
         try
         {
@@ -257,17 +344,15 @@ function Format-PlanFile
         if ($exit -ne 0)
         {
             $last = @($output | ForEach-Object { "$_" } | Where-Object { $_.Trim() }) | Select-Object -Last 1;
-            $result.Problem = "prettier exited $($exit): $last";
+            $result.Problem = (@($result.Problem, "prettier exited $($exit): $last") | Where-Object { $_ }) -join '; ';
         }
-
-        $result.Formatted = @($Files | Where-Object {
-                -not [System.Linq.Enumerable]::SequenceEqual([byte[]]$before[$_], [byte[]][IO.File]::ReadAllBytes((Join-Path $Repo $_)))
-            });
     }
     catch
     {
-        $result.Problem = "prettier failed: $($_.Exception.Message)";
+        $result.Problem = (@($result.Problem, "prettier failed: $($_.Exception.Message)") | Where-Object { $_ }) -join '; ';
     }
+
+    $result.Formatted = @(& $changedFiles);
 
     return $result;
 }
@@ -326,7 +411,7 @@ if ($PSCmdlet.ShouldProcess($PlansRepo, "commit `"$Message`""))
 
         $markdown = @((@(git -C $PlansRepo diff --cached --name-only --diff-filter=AMR -z -- '*.md') -join "`n") -split "`0" | Where-Object { $_ });
         $format = Format-PlanFile -Repo $PlansRepo -Files $markdown -Config (Join-Path $PSScriptRoot 'plan.prettierrc.json') -Disabled:$NoFormat;
-        if ($format.Attempted)
+        if ($format.Attempted -or @($format.Formatted).Count -gt 0)
         {
             git -C $PlansRepo add -A;
             if ($LASTEXITCODE -ne 0)
