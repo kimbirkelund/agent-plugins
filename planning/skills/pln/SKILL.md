@@ -279,8 +279,9 @@ not a reason to write it for posterity.
 ```markdown
 # Plan: <short title>
 
-Status: PLANNING Updated: <YYYY-MM-DD, from `date +%F`> Repo: <absolute path,
-from Get-PlanContext's RepoRoot>
+- Status: PLANNING
+- Updated: <YYYY-MM-DD, from `date +%F`>
+- Repo: <absolute path, from Get-PlanContext's RepoRoot>
 
 ## Goal
 
@@ -305,9 +306,10 @@ depend on it. Each step names the files it touches, which is what makes
 
 ## How to execute plan
 
-Team: <one member per subsystem, plus a verifier and a reviewer> Parallel: <step
-groups that may run at once, or `none`> Checkpoints: at end Verify: <command and
-observable outcome, or `none`>
+- Team: <one member per subsystem, plus a verifier and a reviewer>
+- Parallel: <step groups that may run at once, or `none`>
+- Checkpoints: at end
+- Verify: <command and observable outcome, or `none`>
 
 ## Open questions
 
@@ -316,6 +318,11 @@ anything stands here, so an entry is a blocker, not a note.
 ```
 
 ## The header block
+
+Each header field is a list item (`- Status: PLANNING`), one per line, so the
+plan's 80-column wrapping cannot join them. A plan still in the old bare form
+(`Status: PLANNING`) is converted by the next save; write the list form
+yourself.
 
 `Status:` and `Updated:` are yours on every write. `Repo:` is yours once, when
 you create the plan — the plan no longer sits inside the repository it is about,
@@ -332,8 +339,10 @@ plan that is already in flight.
 
 This section is the contract with `/impl`, which refuses to start without it. It
 says how to move through the plan, never what the work is — that is `## Steps`.
-Read `../pln/references/execution.md`: it defines all four lines and the rules
-they bind `/impl` to. Four are required, and the gate validates all four:
+Read `../pln/references/execution.md`: it defines all four fields and the rules
+they bind `/impl` to. Each is a list item (`- Team: ...`), one per line; a plan
+in the old bare form is converted by the next save. Four are required, and the
+gate validates all four:
 
 - **`Team:`** — a list of member names. The work is always staffed by a team, so
   this is not a choice about _whether_, only about how large. One implementer

@@ -18,13 +18,14 @@ description of how to execute made the gate fuzzy and made every plan author
 design a staffing strategy from scratch; a line that is a list of names is
 checkable, and a plan either satisfies it or does not.
 
-Four lines, all four required, all four validated:
+Four fields, all four required, all four validated. Each is a list item, one per
+line:
 
 ```
-Team: parser, storage, verifier, reviewer
-Parallel: 2+3, then 4, then 5+6
-Checkpoints: at end
-Verify: ./run-tests.sh; the step is done when it exits 0
+- Team: parser, storage, verifier, reviewer
+- Parallel: 2+3, then 4, then 5+6
+- Checkpoints: at end
+- Verify: ./run-tests.sh; the step is done when it exits 0
 ```
 
 ## `Team:` — how large
@@ -65,8 +66,8 @@ would be routed wrong for one of them.
 Step groups that may run concurrently, in order, or the literal `none`:
 
 ```
-Parallel: 2+3, then 4, then 5+6
-Parallel: none
+- Parallel: 2+3, then 4, then 5+6
+- Parallel: none
 ```
 
 Every number must be a step in `## Steps` — which is why steps are numbered.
@@ -220,9 +221,10 @@ Three consequences the two halves have to agree on:
   for a file beside the code, and a member handed a step must also be handed the
   plan's absolute path.
 
-The header block is small and each line has one owner:
+The header block is a list, one item per field, and each item has one owner. A
+plan in the old bare form (`Status: ...`) is converted by the next save:
 
-| Line       | Written by                        | Meaning                                                          |
+| Item       | Written by                        | Meaning                                                          |
 | ---------- | --------------------------------- | ---------------------------------------------------------------- |
 | `Status:`  | both, per the table below         | Where the plan is in its life.                                   |
 | `Updated:` | `/pln`, on every write            | Date of the last planning change, from `date +%F`.               |
@@ -263,13 +265,14 @@ Anything else, or no `Status:` line at all, fails the gate.
 ## How `/impl` validates this
 
 The gate refuses to start unless the plan carries a recognised `Status:`, and
-unless `## How to execute plan` exists and satisfies all four lines: `Team:`
-lists at least one implementer plus a verifier and a reviewer; `Parallel:` gives
-step groups whose numbers all exist in `## Steps`, or `none`; `Checkpoints:`
-says when to stop; `Verify:` gives a command **and** its observable outcome, or
-the literal `none`. When the plan has a `Branch:` line, the checked-out branch
-must be that branch. A `Team:` missing a role fails and the refusal says which —
-a plan must never silently become "whatever the model felt like".
+unless `## How to execute plan` exists and satisfies all four list items:
+`Team:` lists at least one implementer plus a verifier and a reviewer;
+`Parallel:` gives step groups whose numbers all exist in `## Steps`, or `none`;
+`Checkpoints:` says when to stop; `Verify:` gives a command **and** its
+observable outcome, or the literal `none`. When the plan has a `Branch:` item,
+the checked-out branch must be that branch. A `Team:` missing a role fails and
+the refusal says which — a plan must never silently become "whatever the model
+felt like".
 
 Two things also refuse on their own: an unconsumed `∫∫...∫∫` marker, which is
 the user's own input waiting to be handled, and anything standing under
