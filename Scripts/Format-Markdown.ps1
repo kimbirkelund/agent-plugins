@@ -6,7 +6,7 @@
     markdownlint judges it, markdownlint-cli2 --fix applies what it can, prettier runs again so
     its formatting wins, and markdownlint-cli2 in check mode reports what is left. Findings are
     printed on stdout as "path:line rule message" and the script exits 1; otherwise it exits 0.
-    markdownlint-cli2 resolves to the one on PATH, else to "npx --yes markdownlint-cli2@0.24.1".
+    markdownlint-cli2 resolves to the one on PATH, else to "npx --yes markdownlint-cli2".
     With neither, lint is skipped silently; a missing prettier skips the prettier passes.
     The markdownlint config is .markdownlint.jsonc in RepoRoot, when present.
 .PARAMETER Path
@@ -81,7 +81,7 @@ else
     $npx = Get-Command npx -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($npx)
     {
-        $linter = @($npx.Source, '--yes', 'markdownlint-cli2@0.24.1')
+        $linter = @($npx.Source, '--yes', 'markdownlint-cli2')
     }
 }
 

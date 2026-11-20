@@ -1,7 +1,3 @@
-BeforeDiscovery {
-    $script:HasMarkdownlint = [bool](Get-Command markdownlint-cli2 -CommandType Application -ErrorAction SilentlyContinue)
-}
-
 BeforeAll {
     $script:Script = Join-Path $PSScriptRoot 'Format-Markdown.ps1'
     $script:Pwsh = (Get-Command pwsh -CommandType Application | Select-Object -First 1).Source
@@ -143,10 +139,15 @@ Describe 'Format-Markdown' {
             $result.ExitCode | Should -Be 0
             $calls = @($result.Calls | Where-Object { $_ -match '^npx\|' })
             $calls.Count | Should -Be 2
-            ($calls[0] -split '\|')[2..4] | Should -Be @('--yes', 'markdownlint-cli2@0.24.1', '--fix')
+            ($calls[0] -split '\|')[2..4] | Should -Be @('--yes', 'markdownlint-cli2', '--fix')
         }
 
-        It 'rewrites an unformatted file with real prettier' -Skip:(-not (Get-Command prettier -CommandType Application -ErrorAction SilentlyContinue)) {
+        It 'rewrites an unformatted file with real prettier' {
+            if (-not (Get-Command prettier -CommandType Application -ErrorAction SilentlyContinue))
+            {
+                throw 'prettier is required for this test but was not found on PATH. Install it (npm install -g prettier).'
+            }
+
             $file = Join-Path $script:Repo 'c.md'
             Set-Content $file "# Title`n* item`n" -NoNewline
             $linter = New-Stub -Name 'markdownlint-cli2'
@@ -268,7 +269,12 @@ Describe 'Format-Markdown' {
         }
     }
 
-    It 'reports MD001 from the real markdownlint-cli2' -Skip:(-not $script:HasMarkdownlint) {
+    It 'reports MD001 from the real markdownlint-cli2' {
+        if (-not (Get-Command markdownlint-cli2 -CommandType Application -ErrorAction SilentlyContinue) -and -not (Get-Command npx -CommandType Application -ErrorAction SilentlyContinue))
+        {
+            throw 'markdownlint-cli2 is required for this test but neither markdownlint-cli2 nor npx was found on PATH. Install one (npm install -g markdownlint-cli2).'
+        }
+
         Set-Content (Join-Path $script:Repo 'r.md') "# A`n`n### B`n" -NoNewline
 
         $result = Invoke-FormatMarkdown -Path 'r.md'

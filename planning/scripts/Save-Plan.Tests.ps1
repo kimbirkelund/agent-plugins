@@ -1,7 +1,3 @@
-BeforeDiscovery {
-    $script:HasPrettier = [bool](Get-Command prettier -CommandType Application -ErrorAction SilentlyContinue)
-}
-
 BeforeAll {
     $script:ScriptPath = Join-Path $PSScriptRoot 'Save-Plan.ps1';
 
@@ -685,7 +681,14 @@ Describe 'Save-Plan' {
             }
         }
 
-        Context 'with the real prettier' -Skip:(-not $script:HasPrettier) {
+        Context 'with the real prettier' {
+
+            BeforeAll {
+                if (-not (Get-Command prettier -CommandType Application -ErrorAction SilentlyContinue))
+                {
+                    throw 'prettier is required for these tests but was not found on PATH. Install it (npm install -g prettier).'
+                }
+            }
 
             It 'commits a ragged plan formatted and lists it as formatted' {
                 $f = New-Fixture -Existing;
