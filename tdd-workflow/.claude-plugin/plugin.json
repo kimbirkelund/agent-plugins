@@ -1,0 +1,10 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "tdd-workflow",
+  "version": "0.1.0",
+  "description": "Test-driven development workflow: a skill that drives code changes through the red, green, refactor cycle, writing a failing test before the code that makes it pass.",
+  "author": {
+    "name": "Kim Birkelund"
+  },
+  "keywords": ["tdd", "testing", "workflow"]
+}

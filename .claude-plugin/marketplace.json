@@ -11,6 +11,12 @@
       "description": "Plan-driven workflow: capture a plan in its own git repository, execute it with a delegated team in a branch or worktree of its own, and consume in-file markers.",
       "source": "./planning",
       "category": "workflow"
+    },
+    {
+      "name": "tdd-workflow",
+      "description": "Test-driven development workflow: drive code changes through the red, green, refactor cycle, failing test first.",
+      "source": "./tdd-workflow",
+      "category": "workflow"
     }
   ]
 }
