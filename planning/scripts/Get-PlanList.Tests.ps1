@@ -53,16 +53,18 @@ BeforeAll {
             [string]$Goal = 'ship the thing.',
             [int]$Steps = 0,
             [string[]]$OpenQuestions = @(),
-            [string[]]$Markers = @()
+            [string[]]$Markers = @(),
+            [switch]$ListForm
         )
 
         New-Item -ItemType Directory -Path $Fixture.PlanDir -Force | Out-Null;
 
-        $lines = @("# Plan: $Title", '', "Status: $Status");
+        $m = if ($ListForm) { '- ' } else { '' };
+        $lines = @("# Plan: $Title", '', "${m}Status: $Status");
         # An empty -Updated writes no Updated: line at all, so a test can cover a plan that
         # never got one — the one header field that crosses JSON as null.
-        if ($Updated) { $lines += "Updated: $Updated" }
-        if ($Branch) { $lines += "Branch: $Branch" }
+        if ($Updated) { $lines += "${m}Updated: $Updated" }
+        if ($Branch) { $lines += "${m}Branch: $Branch" }
         $lines += @('', '## Goal', '', $Goal, '', '## Steps', '');
         for ($i = 1; $i -le $Steps; $i++) { $lines += "$i. do thing $i" }
         $lines += @('', '## Open questions', '');
@@ -282,7 +284,46 @@ Describe 'Get-PlanList' {
 
         It 'counts what stands under open questions' {
             $f = New-Fixture;
-            New-PlanFile $f -Name 'p.md' -OpenQuestions @('which database?', 'who owns the migration?');
+            New-PlanFile $f -Name 'p.md' -OpenQuestions @('- which database?', '- who owns the migration?');
+
+            (Invoke-List $f).Plans[0].OpenQuestions | Should -Be 2;
+        }
+
+        It 'reads a list-form plan the same as the bare form' {
+            $f = New-Fixture;
+            New-PlanFile $f -Name 'a-list.md' -Status 'IMPLEMENTING' -Branch 'kbi/x' -Title 'same' -Updated '2026-09-05' -ListForm;
+
+            $p = (Invoke-List $f).Plans[0];
+
+            $p.Status | Should -Be 'IMPLEMENTING';
+            $p.Title | Should -Be 'same';
+            $p.Updated | Should -Be '2026-09-05';
+        }
+
+        It 'counts an open question wrapped over three lines as a list item once' {
+            $f = New-Fixture;
+            New-PlanFile $f -Name 'p.md' -OpenQuestions @('- which database should we', '  pick for the store, given', '  the latency budget?');
+
+            (Invoke-List $f).Plans[0].OpenQuestions | Should -Be 1;
+        }
+
+        It 'counts two wrapped paragraphs separated by a blank line as two' {
+            $f = New-Fixture;
+            New-PlanFile $f -Name 'p.md' -OpenQuestions @('which database should we', 'pick for the store?', '', 'who owns the', 'migration?');
+
+            (Invoke-List $f).Plans[0].OpenQuestions | Should -Be 2;
+        }
+
+        It 'counts numbered open questions once per item' {
+            $f = New-Fixture;
+            New-PlanFile $f -Name 'p.md' -OpenQuestions @('1. which database?', '2. who owns the', '   migration?', '3. when do we ship?');
+
+            (Invoke-List $f).Plans[0].OpenQuestions | Should -Be 3;
+        }
+
+        It 'counts an indented nested item as part of the entry above' {
+            $f = New-Fixture;
+            New-PlanFile $f -Name 'p.md' -OpenQuestions @('- which database?', '  - postgres', '  - sqlite', '- who owns it?');
 
             (Invoke-List $f).Plans[0].OpenQuestions | Should -Be 2;
         }

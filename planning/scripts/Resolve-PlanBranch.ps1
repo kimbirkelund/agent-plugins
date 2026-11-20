@@ -71,11 +71,11 @@ function Write-Result([string]$Mode, [string]$ResultBranch, [string]$ResultPath)
     } | ConvertTo-Json -Compress;
 }
 
-# Same header read as Get-PlanContext.ps1: the top of the file, first `Branch:` line.
+# Same header read as Get-PlanContext.ps1: the top of the file, first `Branch:` line (bare or list item).
 $planBranch = $null;
 foreach ($line in (Get-Content -LiteralPath $planPath -TotalCount 20))
 {
-    if ($line -match '^Branch:\s*(\S+)') { $planBranch = $Matches[1]; break }
+    if ($line -match '^(?:[-*+]\s+)?Branch:\s*(\S+)') { $planBranch = $Matches[1]; break }
 }
 
 $context = & (Join-Path $PSScriptRoot 'Get-PlanContext.ps1') -Path $repoRootPath | ConvertFrom-Json;

@@ -61,14 +61,15 @@ BeforeAll {
 
     function New-PlanFile
     {
-        param($Fixture, [string]$Name, [string]$Status = 'PLANNING', [string]$Branch, [string]$Title = 'a plan', [string]$Updated = '2026-09-01')
+        param($Fixture, [string]$Name, [string]$Status = 'PLANNING', [string]$Branch, [string]$Title = 'a plan', [string]$Updated = '2026-09-01', [switch]$ListForm)
 
         New-Item -ItemType Directory -Path $Fixture.PlanDir -Force | Out-Null;
-        $lines = @("# Plan: $Title", '', "Status: $Status");
+        $m = if ($ListForm) { '- ' } else { '' };
+        $lines = @("# Plan: $Title", '', "${m}Status: $Status");
         # An empty -Updated writes no Updated: line at all, so a test can cover a plan that
         # never got one.
-        if ($Updated) { $lines += "Updated: $Updated" }
-        if ($Branch) { $lines += "Branch: $Branch" }
+        if ($Updated) { $lines += "${m}Updated: $Updated" }
+        if ($Branch) { $lines += "${m}Branch: $Branch" }
         $lines += @('', '## Goal', '', 'something');
         $lines -join "`n" | Set-Content -LiteralPath (Join-Path $Fixture.PlanDir $Name);
     }
@@ -166,6 +167,27 @@ Describe 'Get-PlanContext' {
             Set-PlanConfig $f '{ not json';
 
             { Invoke-Context $f } | Should -Throw -ExpectedMessage '*not valid JSON*';
+        }
+    }
+
+    Context 'header forms' {
+
+        It 'reads a list-form plan the same as the bare form' {
+            $f = New-Fixture;
+            New-PlanFile $f -Name '2026-09-01-bare.md' -Status 'IMPLEMENTING' -Branch 'kbi/x' -Title 'same' -Updated '2026-09-05';
+            $bare = @((Invoke-Context $f).Candidates)[0];
+            Remove-Item -LiteralPath (Join-Path $f.PlanDir '2026-09-01-bare.md');
+            New-PlanFile $f -Name '2026-09-01-bare.md' -Status 'IMPLEMENTING' -Branch 'kbi/x' -Title 'same' -Updated '2026-09-05' -ListForm;
+            $list = @((Invoke-Context $f).Candidates)[0];
+
+            $bare.Status | Should -Be 'IMPLEMENTING';
+            $bare.Branch | Should -Be 'kbi/x';
+            $bare.Updated | Should -Be '2026-09-05';
+            $bare.Title | Should -Be 'same';
+            $list.Status | Should -Be $bare.Status;
+            $list.Branch | Should -Be $bare.Branch;
+            $list.Updated | Should -Be $bare.Updated;
+            $list.Title | Should -Be $bare.Title;
         }
     }
 

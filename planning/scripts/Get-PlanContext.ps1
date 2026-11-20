@@ -220,9 +220,9 @@ function Get-PlanHeader([string]$PlanPath)
     foreach ($line in $lines)
     {
         if (-not $title -and $line -match '^#\s*Plan:\s*(.+?)\s*$') { $title = $Matches[1]; continue }
-        if (-not $status -and $line -match '^Status:\s*(\S+)') { $status = $Matches[1]; continue }
-        if (-not $branch -and $line -match '^Branch:\s*(\S+)') { $branch = $Matches[1]; continue }
-        if (-not $updated -and $line -match '^Updated:\s*(\S+)') { $updated = $Matches[1]; continue }
+        if (-not $status -and $line -match '^(?:[-*+]\s+)?Status:\s*(\S+)') { $status = $Matches[1]; continue }
+        if (-not $branch -and $line -match '^(?:[-*+]\s+)?Branch:\s*(\S+)') { $branch = $Matches[1]; continue }
+        if (-not $updated -and $line -match '^(?:[-*+]\s+)?Updated:\s*(\S+)') { $updated = $Matches[1]; continue }
     }
 
     return [pscustomobject]@{
