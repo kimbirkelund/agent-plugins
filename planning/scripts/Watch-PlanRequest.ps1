@@ -84,7 +84,7 @@ $issueContext = & (Join-Path $PSScriptRoot 'Get-IssueContext.ps1') | ConvertFrom
 
 if ($issueContext.Tracker -eq 'unknown')
 {
-    throw "Cannot watch the request: the issue tracker of '$($issueContext.RepoRoot)' is unknown. Use a github.com or gitlab.com origin, or set issueTracker in the planning config.";
+    throw "Cannot watch the request: the issue tracker of '$($issueContext.RepoRoot)' is unknown. Use an origin whose host part contains github or gitlab, or set issueTracker in the planning config.";
 }
 if (-not $issueContext.CliAvailable)
 {

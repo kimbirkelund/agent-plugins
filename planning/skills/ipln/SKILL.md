@@ -65,8 +65,10 @@ repository uses. Never infer it from a remote URL yourself, and never assume
 `gh`. It prints one JSON object:
 
 - **`Tracker`** — `github`, `gitlab`, or `unknown`. It reads the origin remote's
-  host first, then the `issueTracker` key in the planning config for a
-  self-hosted instance whose host name gives nothing away.
+  host part first: a case-insensitive `github` or `gitlab` in the authority of a
+  URL, or before the first `:` of an scp-style remote, never in the path; both
+  words or neither gives no match. Then the `issueTracker` key in the planning
+  config when the host part gives no match, then `unknown`.
 - **`Cli`** — `gh`, `glab`, or `null`. **`CliAvailable`** — whether that CLI is
   actually on `PATH`.
 - **`RepoRoot`** — where to run `gh` and `glab` from. Both resolve which
