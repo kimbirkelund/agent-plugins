@@ -37,13 +37,17 @@ Every build and test run is preceded by a commit of the tree as it is about to
 be built, with the prediction as the message. These commits are a working log:
 many are red or do not compile on purpose, and nobody verifies them one by one.
 
-When the work is finished, the history is rewritten, with the user, into the
+When the work is finished, the skill stops for the user to verify it. Only once
+the user accepts the work is the history rewritten, with the user, into the
 commits a reviewer reads. Each final commit is one logical unit, either
 structural or behavioural, and builds and passes the whole test suite on its
-own. The tree after the rewrite is identical to the tree before it.
+own. Before the rewrite starts, a local backup branch is made. Once the tree
+after the rewrite is validated identical to the tree before it, the backup is
+deleted. If the trees differ, the backup stays and the user decides.
 
-The skill commits on whatever branch is checked out. It does not create branches
-or push.
+The skill commits on whatever branch is checked out. It creates no branch for
+the work itself and never pushes; the one branch it makes is the temporary local
+backup during the rewrite.
 
 ## Sources
 

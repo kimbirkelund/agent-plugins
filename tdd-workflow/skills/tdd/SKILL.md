@@ -225,8 +225,13 @@ A unit of work is finished when every entry is `[x]` or struck through, the
 build succeeds and the whole test suite passes. That tree is what gets verified,
 not the working commits that led to it.
 
-When all the work is finished, rewrite the history, with the user, into the
-commits a reviewer reads. Each final commit:
+At this point, stop and let the user verify the work. Do not run any rewriting
+command until the user has accepted the work and said to rewrite. Reason: the
+rewrite replaces every commit on the branch, so it is the user's call, not a
+step the skill takes on its own.
+
+Once the user has accepted it, rewrite the history, with them, into the commits
+a reviewer reads. Each final commit:
 
 - is one logical unit;
 - is either structural or behavioural, and says which in its message;
@@ -234,9 +239,30 @@ commits a reviewer reads. Each final commit:
 - is verified individually: it builds without warnings and the whole test suite
   passes at that commit, and it does what its message says.
 
-The tree after the rewrite is identical to the tree before it. Reason: the final
-commits are the ones that stay, so they are the ones held to Beck's commit
-discipline.
+Do the rewrite in this order:
+
+1. Create a backup branch at HEAD with `git branch <branch>-backup`, where
+   `<branch>` is the name `git branch --show-current` prints. If that prints
+   nothing (detached HEAD), or `git branch` fails for any reason, such as the
+   backup branch already existing, stop and tell the user. Do not overwrite or
+   delete anything.
+2. Rewrite the history, with the user, into final commits as described above,
+   and verify each final commit individually.
+3. Validate the tree: `git rev-parse '<branch>-backup^{tree}'` and
+   `git rev-parse 'HEAD^{tree}'` print the same id. The commits differ after a
+   rewrite; only the trees must match.
+4. On a match, delete the backup with `git branch -D <branch>-backup`. It must
+   be `-D`: the rewritten history does not contain the backup's commits, so `-d`
+   refuses.
+5. On a mismatch, keep the backup and report both tree ids to the user. The way
+   back is `git reset --hard <branch>-backup`, taken with the user and never
+   alone.
+
+The backup branch is never pushed.
+
+The tree after the rewrite is identical to the tree before it, and step 3 is the
+check. Reason: the final commits are the ones that stay, so they are the ones
+held to Beck's commit discipline.
 
 ## When the work is delegated
 
