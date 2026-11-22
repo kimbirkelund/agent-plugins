@@ -319,6 +319,20 @@ Describe 'Get-PlanContext' {
             (Invoke-Context $f).Session.Command | Should -Be 'wezterm start --cwd {path}';
         }
 
+        It 'reads the finish hook in each form' {
+            $f = New-Fixture;
+            Set-PlanConfig $f '{ "finish": { "skill": "post-merge-cleanup" } }';
+            (Invoke-Context $f).Finish.Skill | Should -Be 'post-merge-cleanup';
+
+            Set-PlanConfig $f '{ "finish": { "command": "gh pr merge {branch}" } }';
+            (Invoke-Context $f).Finish.Command | Should -Be 'gh pr merge {branch}';
+
+            Set-PlanConfig $f '{ "finish": { "skill": "post-merge-cleanup", "command": "gh pr merge {branch}" } }';
+            $context = Invoke-Context $f;
+            $context.Finish.Command | Should -Be 'gh pr merge {branch}';
+            $context.Finish.PSObject.Properties.Name | Should -Not -Contain 'Skill';
+        }
+
         It 'reads a command hook' {
             $f = New-Fixture;
             Set-PlanConfig $f '{ "surface": { "command": "open {path}" } }';
@@ -350,6 +364,7 @@ Describe 'Get-PlanContext' {
             $context.Surface | Should -BeNullOrEmpty;
             $context.Worktree | Should -BeNullOrEmpty;
             $context.Session | Should -BeNullOrEmpty;
+            $context.Finish | Should -BeNullOrEmpty;
         }
 
         It 'reports every hook as absent when there is no config file at all' {
@@ -360,6 +375,7 @@ Describe 'Get-PlanContext' {
             $context.Surface | Should -BeNullOrEmpty;
             $context.Worktree | Should -BeNullOrEmpty;
             $context.Session | Should -BeNullOrEmpty;
+            $context.Finish | Should -BeNullOrEmpty;
         }
     }
 

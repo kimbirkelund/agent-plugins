@@ -35,7 +35,8 @@
         "plansRepo": "~/code/plans",
         "surface":  { "skill": "show-me" },
         "worktree": { "command": "gw {repo} {name}" },
-        "session":  { "command": "wezterm start --cwd {path}" }
+        "session":  { "command": "wezterm start --cwd {path}" },
+        "finish":   { "skill": "post-merge-cleanup" }
       }
 
     Every key is optional. plansRepo defaults to <code root>/plans, where the code root is
@@ -404,6 +405,7 @@ if ($Title)
     Surface         = (Get-Hook $config 'surface')
     Worktree        = (Get-Hook $config 'worktree')
     Session         = (Get-Hook $config 'session')
+    Finish          = (Get-Hook $config 'finish')
     ConfigPath      = $configInfo.Path
     ConfigExists    = $configInfo.Exists
 } | ConvertTo-Json -Depth 5
