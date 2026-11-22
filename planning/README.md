@@ -1,16 +1,17 @@
 # planning
 
-Plan-driven workflow. Seven commands and five scripts:
+Plan-driven workflow. Eight commands and the scripts behind them:
 
-| Command        | Does                                                                                                                                                                                                                                                               |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `/pln`         | Captures what is being discussed as a plan in the plans repository, then holds planning mode. `/pln <letter\|name>` refines an existing plan instead. Writes nothing else.                                                                                         |
-| `/oimpl`       | Validates the plan, creates the worktree, writes it into the plan, and opens an interactive session there. Does not run the plan.                                                                                                                                  |
-| `/impl`        | Runs the plan unattended in that session with a delegated team, from the gate to `DONE`. Lands one commit per step and records any divergence from the plan under `## Divergences` in the plan. Creates the branch itself when run directly on a plan without one. |
-| `/ipln`        | Same conversation as `/pln`, but the deliverable is issues in this repository's own tracker — drafted locally, shown for review, posted only on an explicit go-ahead.                                                                                              |
-| `/migrate-pln` | Moves an old working-tree `PLAN.md` into the plans repository, in the current format. One-shot, per plan.                                                                                                                                                          |
-| `/rewrt`       | Consumes `∫∫...∫∫` marker notes written into files.                                                                                                                                                                                                                |
-| `/list-plns`   | Lists this repository's plans — unfinished by default, in flight last, each with the letter `/pln` and `/oimpl` accept as a selector. Read-only.                                                                                                                   |
+| Command        | Does                                                                                                                                                                                                                                                                                      |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/pln`         | Captures what is being discussed as a plan in the plans repository, then holds planning mode. `/pln <letter\|name>` refines an existing plan instead. Writes nothing else.                                                                                                                |
+| `/oimpl`       | Validates the plan, creates the worktree, writes it into the plan, and opens an interactive session there. Does not run the plan.                                                                                                                                                         |
+| `/impl`        | Runs the plan unattended in that session with a delegated team, from the gate to `DONE`. Lands one commit per step and records any divergence from the plan under `## Divergences` in the plan. Creates the branch itself when run directly on a plan without one.                        |
+| `/fnsh`        | Stays with a `DONE` plan's PR or MR until it is merged: fixes failures and required review comments the branch caused with pushed `fixup!` commits, reports the rest, rebases on a conflict with the default branch, and after the merge removes the worktree and runs the `finish` hook. |
+| `/ipln`        | Same conversation as `/pln`, but the deliverable is issues in this repository's own tracker — drafted locally, shown for review, posted only on an explicit go-ahead.                                                                                                                     |
+| `/migrate-pln` | Moves an old working-tree `PLAN.md` into the plans repository, in the current format. One-shot, per plan.                                                                                                                                                                                 |
+| `/rewrt`       | Consumes `∫∫...∫∫` marker notes written into files.                                                                                                                                                                                                                                       |
+| `/list-plns`   | Lists this repository's plans — unfinished by default, in flight last, each with the letter `/pln` and `/oimpl` accept as a selector. Read-only.                                                                                                                                          |
 
 ## Plans live in their own repository
 
@@ -47,6 +48,51 @@ with the per-plan counts `/list-plns` reports. `scripts/Resolve-PlanBranch.ps1`
 decides whether a plan lands on its own recorded branch or a fresh one, and
 refuses a branch another plan owns. The skills call them rather than deriving
 paths, and every script has Pester tests beside it.
+
+## `/fnsh` shepherds the request to merge
+
+Run `/fnsh` in a plan's worktree once `/impl` has set `Status: DONE` and the
+branch has a pull request (GitHub) or merge request (GitLab). It refuses a plan
+that is not `DONE` and a checkout that is not the plan's `Branch:`. It does not
+create the request; with none for the branch it says so and stops.
+
+`scripts/Watch-PlanRequest.ps1` polls the request and prints one JSON event per
+line: `pipeline-failed`, `comments`, `conflict`, and the three that end the
+watch, `merged`, `closed` and `no-request`. `/fnsh` runs it with the `Monitor`
+tool, restarts it when the monitor expires, and handles the events in order of
+arrival. What was already emitted is kept in `fnsh-state.json` in the worktree's
+git directory, so a restarted watch repeats nothing. On GitHub a re-run of
+failed checks on the same head sha gives no new event.
+
+- **A failed pipeline** is classified. A failure the branch's changes caused is
+  fixed, verified with the plan's `Verify:` line, committed as a `fixup!` on the
+  commit that introduced the code (or, when no branch commit did, the one that
+  made the fix necessary), and pushed with a plain `git push`. An unrelated
+  failure is reported with its evidence and not fixed.
+- **Each review comment** gets a verdict with a reason: `required`,
+  `correct-outside-plan`, `unclear` or `wrong`. Only `required` comments are
+  fixed and pushed the same way. Every verdict goes to you in the session;
+  nothing is posted on the request.
+- **A conflict with the default branch** is rebased onto `origin/<default>`. A
+  resolution that would break a plan decision or behaviour the plan specifies
+  aborts the rebase and is reported. Otherwise the branch is verified; a
+  verification that still fails after two fix rounds undoes the rebase. A
+  verified branch is left for you to force-push; `/fnsh` never force-pushes, and
+  fixes made until you do are committed locally and not pushed. A conflict with
+  any other target is only reported.
+- **A merge** runs `scripts/Remove-PlanWorktree.ps1`: it pulls the target branch
+  with `--ff-only` where it is checked out, removes the plan's worktree without
+  `--force` (a dirty worktree is reported and left, the main worktree is never
+  removed, the local branch is kept), and then the `finish` hook runs.
+
+Each fix gets at most two rounds. `/fnsh` never writes to the plan, never
+squashes the `fixup!` commits, and writes nothing to the forge except
+`git push`. Every turn ends with a numbered summary of everything handled since
+it started, with the pushed sha and time for each fix.
+
+`/fnsh` stops when the request is merged, closed or missing, or when you post a
+prompt: it stops the watch, answers, and names any event it received but did not
+finish. Run `/fnsh` again to resume the watch.
 
 ## Issues go to the repository's own tracker
 
@@ -108,7 +154,8 @@ is optional.
   "issueTracker": "gitlab",
   "surface": { "skill": "show-me" },
   "worktree": { "skill": "new-branch-or-worktree" },
-  "session": { "command": "wezterm start --cwd {path}" }
+  "session": { "command": "wezterm start --cwd {path}" },
+  "finish": { "command": "notify-send 'Merged {branch}'" }
 }
 ```
 
@@ -145,13 +192,21 @@ goes to `session`. A command hook should print that path on stdout.
 
 Invoked by `/oimpl`, last, with the absolute path of the worktree it just made.
 Normally a terminal or multiplexer command, so it is expected to return
-immediately. Unlike the other two, an absent `session` hook **is** reported:
+immediately. Unlike the other hooks, an absent `session` hook **is** reported:
 `/oimpl` has set the work up but cannot open anything, so it prints the path and
 tells you to open a session there yourself.
 
+### `finish` — what runs after a request is merged
+
+Invoked by `/fnsh` once the request is merged, after the target branch is pulled
+and the plan's worktree is removed. Commands run from the repository root,
+because the worktree is gone. A skill gets the plan's absolute path as its
+argument. Use it for whatever your own wrap-up is: a notification, a ticket
+update, a cleanup script. Absent means nothing is invoked and nothing is said.
+
 ### Hook forms
 
-Either hook takes a skill or a command:
+Every hook takes a skill or a command:
 
 ```json
   "surface":  { "skill": "show-me" }
@@ -170,11 +225,12 @@ Either hook takes a skill or a command:
 
 Placeholders:
 
-| Hook       | Placeholders                                                                           |
-| ---------- | -------------------------------------------------------------------------------------- |
-| `surface`  | `{path}` — the plan's absolute path                                                    |
-| `worktree` | `{repo}` — repository root; `{name}` — kebab-case slug from the plan's title; `{plan}` |
-| `session`  | `{path}` — the worktree's absolute path; plus `{repo}`, `{branch}`, `{plan}`           |
+| Hook       | Placeholders                                                                                    |
+| ---------- | ----------------------------------------------------------------------------------------------- |
+| `surface`  | `{path}` — the plan's absolute path                                                             |
+| `worktree` | `{repo}` — repository root; `{name}` — kebab-case slug from the plan's title; `{plan}`          |
+| `session`  | `{path}` — the worktree's absolute path; plus `{repo}`, `{branch}`, `{plan}`                    |
+| `finish`   | `{plan}` — the plan's absolute path; `{repo}` — repository root; `{branch}` — the plan's branch |
 
 ## Report gate hook
 
