@@ -3,9 +3,11 @@ name: oimpl
 description:
   Open the implementation session for a finished plan — validate it, create the
   branch or worktree the work will land on, attach it to the plan, and open a
-  new interactive session there for /impl to run in. Use when the user types
-  /oimpl.
-argument-hint: "[plan to open — omit to use this repository's active plan]"
+  new interactive session there for /impl to run in. Without an argument it
+  opens the plan this session planned with /pln, or offers the plans /list-plns
+  showed. Use when the user types /oimpl.
+argument-hint:
+  "[plan to open — omit to use the plan this session planned or listed]"
 disable-model-invocation: true
 ---
 
@@ -33,29 +35,97 @@ the two agree because both write the same `Branch:` item.
 
 ## Procedure
 
-1. **Find the plan.** With an argument, pass it as `-Plan` to
-   `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Get-PlanContext.ps1"` from the
-   session's working directory; with none, run it bare. `selected` means the
-   argument named the plan unambiguously — continue with it. `ambiguous` means
-   several plans could be meant — list `Matches`' titles and statuses when an
-   argument was passed, `Candidates`' otherwise, ask which, and stop. `no-match`
-   means the argument matched no plan — say so, and stop. `none` means there is
-   nothing to open; send the user to `/pln`. The argument only selects the plan:
-   a request in it to use some other branch or worktree is not something this
-   skill can honour, so say that and stop.
+1. **Find the plan** — see _Choosing the plan_. With an argument, pass it as
+   `-Plan` to `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Get-PlanContext.ps1"`
+   from the session's working directory: `selected` means the argument named the
+   plan unambiguously — continue with it. `ambiguous` means several plans could
+   be meant — list `Matches`' titles and statuses, ask which, and stop.
+   `no-match` means the argument matched no plan — say so, and stop. The
+   argument only selects the plan: a request in it to use some other branch or
+   worktree is not something this skill can honour, so say that and stop. With
+   no argument, run the script bare to read `Candidates`, and choose by the
+   session: the plans `/pln` planned here, else the ready plans `/list-plns`
+   showed, else an error and stop. Say which plan you picked and why, then
+   resolve it with `-Plan <file name>` and continue only on `selected`.
 2. **Pre-flight the plan** — see below. On any failure, **create nothing** and
    stop.
 3. **Get the worktree**, either from the plan's existing `Branch:` item or from
    the worktree hook — see _Making the worktree_.
 4. **Attach it to the plan**: write `- Branch:` as a list item into the header
    list (bare `Branch:` when the plan is still in the bare form; the save
-   converts it) and commit with
-   `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Save-Plan.ps1" -Message "plan: branch for <title>"`.
+   converts it) and commit with:
+
+   ```pwsh
+   pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Save-Plan.ps1" -Message "plan: branch for <title>"
+   ```
+
    Nothing else in the plan changes — `Status:` stays `PLANNING` and `Base:`
    stays unwritten, because the run has not started.
+
 5. **Open the session** — see _Opening the session_.
 6. **Report** the branch, the absolute worktree path, and that `/impl` is what
    runs there. Two lines.
+
+## Choosing the plan
+
+`/oimpl` runs in the session that planned, after `/pln` or `/list-plns`. So with
+no argument the session is what says which plan, not the `PlanMatch` of the bare
+call: ignore that value, whether it is `branch`, `only-active`, `ambiguous` or
+`none`, and decide from `Candidates`. An argument is the user naming the plan,
+so it needs no session evidence and is handled the same whether or not `/pln` or
+`/list-plns` has run.
+
+**Eligible** and **ready** mean the same thing: in `Candidates`, with
+`Status: PLANNING` and no `Branch:`. A plan with a `Branch:` has already been
+opened by `/oimpl` or started by `/impl`, and a `DONE` one is spent. That is
+what makes a second bare `/oimpl` after a split open the next part. An argument
+still reaches any plan.
+
+A plan was **planned by `/pln` in this session** when a `/pln` call in this
+conversation created or revised it. A plan the session only read does not count.
+Nothing on disk records which session wrote a plan, so the conversation is the
+only evidence.
+
+With no argument, take the first case that holds:
+
+1. **`/pln` has run in this session and planned eligible plans.**
+   - Exactly one: use it.
+   - Several, with a clear first plan: use that.
+   - Otherwise: a selector over those plans.
+
+   A session plan that is no longer eligible drops out; when none is left, fall
+   through to the next case.
+
+2. **`/list-plns` has run in this session.** A selector over the ready plans.
+   When exactly one plan is ready, use it without a selector, which needs two
+   options. When none is ready, say there is nothing ready to open, send the
+   user to `/pln`, and stop; list nothing and ask nothing.
+3. **Neither.** Report that `/oimpl` runs after `/pln` or `/list-plns` in the
+   same session, or with a plan as its argument, and stop. List nothing and ask
+   nothing.
+
+**The clear first plan** is, in this order: the first eligible part in the order
+`/pln` stated when it proposed a split or named a dependency between the plans;
+failing any stated order, the one plan the most recent `/pln` call wrote, when
+that call wrote exactly one. When neither holds there is no clear first plan. A
+stated order is the user's own answer to "which first", and without one the most
+recently planned is what "run it" means.
+
+**The selector** is `AskUserQuestion`: one option per plan, labelled with its
+title and described by its status and `Updated:`. When the plans outnumber the
+tool's option limit, list them as text with their keys instead, ask which, and
+stop.
+
+**Say which plan you picked and why** — the only one planned here, the first of
+a split, the one just planned, the user's choice — in one line before anything
+is created. The pick is an inference, and that line lets the user stop a wrong
+one.
+
+**Then resolve it through the script**: run `Get-PlanContext.ps1` again with
+`-Plan <file name>`, the chosen candidate's `Name`, and continue only on
+`selected`. Anything else, report it and stop. The conversation decides which
+plan; the script still turns it into a path, so the layout stays known to one
+script.
 
 ## Pre-flight
 
@@ -88,10 +158,15 @@ anyway on the grounds that the plan is nearly there.
 
 ## Making the worktree
 
-Whether the work lands on an existing branch or a new one is decided by a
-script, never by your reading of the argument or the conversation. From the
-session's working directory, run
-`pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Resolve-PlanBranch.ps1" -Plan <absolute plan path>`.
+Once the plan is chosen, whether the work lands on an existing branch or a new
+one is decided by a script, never by your reading of the argument or the
+conversation. The conversation may pick the plan (see _Choosing the plan_); it
+never picks the branch. From the session's working directory, run:
+
+```pwsh
+pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Resolve-PlanBranch.ps1" -Plan <absolute plan path>
+```
+
 It prints one JSON object with `Mode`, `Branch` and `Path`.
 
 **If the script throws**, report its message verbatim and stop. Remove nothing
