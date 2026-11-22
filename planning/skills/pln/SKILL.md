@@ -190,8 +190,9 @@ what is still true. Then branch on what you found:
 - **`Status: PLANNING`, different work** — this is a second plan, not a merge.
   Say that the existing plan is about something else, and write the new work to
   a new `NewPlanPath` rather than folding two pieces of work into one incoherent
-  plan. Both stay `PLANNING`, so say in your reply which one you just wrote and
-  that `/impl` will ask which to run.
+  plan. Both stay `PLANNING`, so say in your reply which one you just wrote,
+  that `/oimpl` from this session opens the plan just written, and that `/impl`
+  run directly will ask which to run.
 - **`Status: IMPLEMENTING`** — work is in flight. Revising is legitimate — it is
   what `/impl` does when a step meets reality — but set `Status:` back to
   `PLANNING`, **preserve the `Base:` and `Branch:` lines `/impl` wrote beside
