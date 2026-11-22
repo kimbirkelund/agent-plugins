@@ -42,12 +42,12 @@ workflow and always ship together; wherever `pln` is installed, they sit beside
 its `SKILL.md`.
 
 ```
-you find the plan ─> provenance ─> gate ─> branch ─> per group: implement ─> per step: verify ─> you commit ─> roll up ─> you record
-                          │          │        │                                                                             │
-                          │          │        └─ worktree hook, Branch: and Base: recorded before the first step             │
-                          │          ├─ at seams: review ─> obvious fixes as `fixup!`, judgement calls to `## Divergences`   │
-                          │          └─ fails: refuse, name what is missing, send them to /pln                              │
-                          └─ you planned it? warn, recommend a fresh session, user decides    every plan write ─> Save-Plan ─┘
+you find the plan ─> show it ─> provenance ─> gate ─> branch ─> per group: implement ─> per step: verify ─> you commit ─> roll up ─> you record
+                                     │          │        │                                                                             │
+                                     │          │        └─ worktree hook, Branch: and Base: recorded before the first step             │
+                                     │          ├─ at seams: review ─> obvious fixes as `fixup!`, judgement calls to `## Divergences`   │
+                                     │          └─ fails: refuse, name what is missing, send them to /pln                              │
+                                     └─ you planned it? warn, recommend a fresh session, user decides    every plan write ─> Save-Plan ─┘
 ```
 
 ## First: find the plan
@@ -69,6 +69,23 @@ nothing beside the code to open. Run
 
 Never derive a plan path yourself, and never fall back to looking for a file in
 the working tree. The script is the only thing that knows the layout.
+
+## Then: show the plan
+
+When `PlanMatch` is `branch` or `only-active`, surface the plan before anything
+else, using the `Surface` field of the same `Get-PlanContext.ps1` output:
+
+- **`Surface.Skill`** — invoke that skill, with the plan's absolute path as its
+  argument.
+- **`Surface.Command`** — run it, with `{path}` replaced by the plan's absolute
+  path.
+- **absent** — surface nothing, and say nothing about it.
+
+Do it once per call, resumes included, and never again during the run. Surfacing
+reads the plan and writes nothing, so it comes before the gate without breaking
+the gate's rule that nothing changes on disk until the plan passes. The user
+sees what is about to run, and a plan the gate refuses is the one they need
+open.
 
 ## Then: is this the session that planned it?
 
@@ -204,13 +221,17 @@ when it did not — you were run directly.
      that the work will land on the checked-out branch, and carry on there.
 3. **Record what came back** as a `- Branch:` list item in the plan's header
    list (in the bare form when the plan is still bare; the save converts it),
-   after
-   `pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Resolve-PlanBranch.ps1" -Plan <absolute plan path> -Branch <the branch the hook returned>`
-   succeeds (with no hook, pass the checked-out branch from
-   `git branch --show-current`) — if it throws, report its message verbatim and
-   stop — and commit that write. Then continue in that branch or worktree — if
-   the hook made a worktree, the work happens there, so every path you hand a
-   member is inside it.
+   after this succeeds (with no hook, pass the checked-out branch from
+   `git branch --show-current`):
+
+   ```pwsh
+   pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Resolve-PlanBranch.ps1" -Plan <absolute plan path> -Branch <the branch the hook returned>
+   ```
+
+   If it throws, report its message verbatim and stop. Otherwise commit that
+   write. Then continue in that branch or worktree — if the hook made a
+   worktree, the work happens there, so every path you hand a member is inside
+   it.
 
 The slug is yours to derive and it is not a decision worth deliberating: the
 plan's title, lowercased and hyphenated. The hook names the branch; you name the

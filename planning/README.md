@@ -128,9 +128,10 @@ asks.
 
 ### `surface` — how a plan is put in front of you
 
-Invoked when `/pln` **creates** a plan, and whenever you ask to see one. Not on
-every revision. `/ipln` uses the same hook for its issue drafts, and does
-surface those on every revision — they are the only copy there is.
+Invoked when `/pln` **creates** a plan, when `/impl` is about to run one — at
+the start of every call, resumes included — and whenever you ask to see one. Not
+on every `/pln` revision. `/ipln` uses the same hook for its issue drafts, and
+does surface those on every revision — they are the only copy there is.
 
 ### `worktree` — how the branch or worktree for the work gets made
 
