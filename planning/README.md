@@ -83,7 +83,13 @@ failed checks on the same head sha gives no new event.
 - **A merge** runs `scripts/Remove-PlanWorktree.ps1`: it pulls the target branch
   with `--ff-only` where it is checked out, removes the plan's worktree without
   `--force` (a dirty worktree is reported and left, the main worktree is never
-  removed, the local branch is kept), and then the `finish` hook runs.
+  removed), and then deletes the local branch. The branch is deleted with
+  `git branch -D` when its tip is the merged request's head commit or an
+  ancestor of it, which covers squash and rebase merges; otherwise
+  `git branch -d` decides, so a branch with local commits the merge does not
+  contain is kept and reported as `branch-not-merged`. A branch whose worktree
+  could not be removed, or that is checked out in the main worktree, is kept.
+  Then the `finish` hook runs.
 
 Each fix gets at most two rounds. `/fnsh` never writes to the plan, never
 squashes the `fixup!` commits, and writes nothing to the forge except
