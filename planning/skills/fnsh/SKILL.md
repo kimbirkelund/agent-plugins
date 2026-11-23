@@ -5,8 +5,8 @@ description:
   the request continuously, fixes pipeline failures and required review comments
   caused by the branch with pushed `fixup!` commits, reports everything else,
   rebases on a conflict with the default branch, and after the merge pulls the
-  target, removes the plan's worktree and invokes the finish hook. Use when the
-  user types /fnsh.
+  target, removes the plan's worktree, deletes the local branch and invokes the
+  finish hook. Use when the user types /fnsh.
 argument-hint:
   "[plan key, name or title fragment, or omit for this branch's plan]"
 disable-model-invocation: true
@@ -223,14 +223,15 @@ and not yet handled is not handled either; each gets a summary item marked
 1. Run:
 
    ```pwsh
-   pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Remove-PlanWorktree.ps1" -Branch <branch> -Target <Request.Target>
+   pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Remove-PlanWorktree.ps1" -Branch <branch> -Target <Request.Target> -MergedSha <Request.HeadSha>
    ```
 
-2. Report what it did: `TargetPath` and `Pulled`, `WorktreePath` and `Removed`.
-   Report any `Reason`, which can be a comma-joined list of
+2. Report what it did: `TargetPath` and `Pulled`, `WorktreePath` and `Removed`,
+   and `BranchDeleted`. Report any `Reason`, which can be a comma-joined list of
    `target-not-checked-out`, `pull-failed`, `dirty`, `remove-failed`,
-   `main-worktree` and `no-worktree`, and `Message` when present, which carries
-   git's error for a failed removal.
+   `main-worktree`, `no-worktree` and `branch-not-merged`, and `Message` when
+   present, which carries git's error for a failed removal or a refused branch
+   deletion.
 3. Invoke the `Finish` hook from step 1's `Get-PlanContext.ps1` output:
    - **`Finish.Skill`** — invoke that skill with the plan's absolute path as its
      argument.
@@ -308,5 +309,6 @@ You do every commit, rebase and push; members never do.
   to it and `Save-Plan.ps1` is never run.
 - **No squash.** `fixup!` commits stay as separate commits on the branch.
 - **`/fnsh` does not create the request.**
-- **Worktree removal is never forced**, and the local branch is not deleted.
-  `Remove-PlanWorktree.ps1` enforces both; do not work around a `Reason`.
+- **Worktree removal is never forced**, and the local branch is deleted only
+  when `Remove-PlanWorktree.ps1` finds nothing local would be lost. Do not work
+  around a `Reason`: no manual `git branch -D`.
