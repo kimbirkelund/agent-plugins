@@ -79,7 +79,8 @@ failed checks on the same head sha gives no new event.
   verification that still fails after two fix rounds undoes the rebase. A
   verified branch is left for you to force-push; `/fnsh` never force-pushes, and
   fixes made until you do are committed locally and not pushed. A conflict with
-  any other target is only reported.
+  any other target is only reported; if the request is later retargeted and
+  still conflicts, `/fnsh` handles the conflict again.
 - **A merge** runs `scripts/Remove-PlanWorktree.ps1`: it pulls the target branch
   with `--ff-only` where it is checked out, removes the plan's worktree without
   `--force` (a dirty worktree is reported and left, the main worktree is never
