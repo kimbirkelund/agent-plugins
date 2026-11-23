@@ -12,10 +12,16 @@
     never disagree about where either of those is.
 
     Detection order:
-      1. the host of the origin remote: github.com (or a *.github.com host such as
-         ssh.github.com) selects `github`; gitlab.com selects `gitlab`;
+      1. the host part of the origin remote: if it contains the word `github` (any casing)
+         and not `gitlab`, the tracker is `github`; if it contains `gitlab` and not
+         `github`, `gitlab`. The host part is, by form: for a URL (`<scheme>://...`) the
+         authority, between `://` and the next `/`; for `git@host:path` or any other
+         scp-style `host:path`, everything before the first `:`; for anything else (a local
+         path) nothing. The path is never inspected, so a repository called `github-tools`
+         on another host does not match. A host part with both words or neither gives no
+         match;
       2. otherwise the `issueTracker` key in the shared planning config, for a self-hosted
-         instance whose host name gives nothing away — value `github` or `gitlab`;
+         instance whose host name gives nothing away - value `github` or `gitlab`;
       3. otherwise `unknown`, and the caller decides what to do about it.
 
     Configuration is read from the same file Get-PlanContext.ps1 reads,
@@ -53,34 +59,40 @@ $ErrorActionPreference = 'Stop';
 $PSNativeCommandUseErrorActionPreference = $false;
 Set-StrictMode -Version Latest;
 
-function Get-RemoteHost([string]$Url)
+function Get-RemoteHostPart([string]$Url)
 {
     if ([string]::IsNullOrWhiteSpace($Url)) { return $null }
 
     $value = $Url.Trim();
 
-    # scp-like syntax carries no scheme: user@host:path. Matched first because a scheme
-    # URL can also embed a user before its own '@', and that form must fall through to the
-    # scheme pattern below instead.
-    if ($value -match '^[^@/\s]+@([^:/\s]+):')
+    # scheme://[user@]host[:port]/path - the host part is the authority, up to the first '/'
+    # after the scheme.
+    if ($value -match '^[a-zA-Z][a-zA-Z0-9+.-]*://([^/\s]*)')
     {
-        return $Matches[1].ToLowerInvariant();
+        return $Matches[1];
     }
 
-    # scheme://[user@]host[:port]/path
-    if ($value -match '^[a-zA-Z][a-zA-Z0-9+.-]*://(?:[^@/\s]+@)?([^:/\s]+)')
+    # scp-like syntax carries no scheme: [user@]host:path, including `git@host:path`. The
+    # host part is everything before the first ':'. A value with a '/' before any ':' is a
+    # local path, not scp-like.
+    if ($value -match '^([^:/\s]+):')
     {
-        return $Matches[1].ToLowerInvariant();
+        return $Matches[1];
     }
 
     return $null;
 }
 
-function Get-TrackerFromHost([string]$RemoteHost)
+function Get-TrackerFromHost([string]$HostPart)
 {
-    if (-not $RemoteHost) { return $null }
-    if ($RemoteHost -match '(^|\.)github\.com$') { return 'github' }
-    if ($RemoteHost -match '(^|\.)gitlab\.com$') { return 'gitlab' }
+    if (-not $HostPart) { return $null }
+
+    $github = $HostPart -match '(?i)github';
+    $gitlab = $HostPart -match '(?i)gitlab';
+
+    # Both words or neither: the host part does not say, so fall through to the config.
+    if ($github -and -not $gitlab) { return 'github' }
+    if ($gitlab -and -not $github) { return 'gitlab' }
 
     return $null;
 }
@@ -128,7 +140,7 @@ if ($planContext.ConfigPath -and (Test-Path -LiteralPath $planContext.ConfigPath
     $config = Get-Content -Raw -LiteralPath $planContext.ConfigPath | ConvertFrom-Json;
 }
 
-$tracker = Get-TrackerFromHost (Get-RemoteHost $remote);
+$tracker = Get-TrackerFromHost (Get-RemoteHostPart $remote);
 if (-not $tracker) { $tracker = Get-TrackerFromConfig $config }
 if (-not $tracker) { $tracker = 'unknown' }
 

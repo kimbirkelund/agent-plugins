@@ -104,9 +104,16 @@ it, `CliAvailable`, and the repository facts and `surface` hook it gets from
 
 Detection is in order:
 
-1. **The host of the origin remote** — `github.com` (including hosts under it,
-   such as `ssh.github.com`) gives `github` and the `gh` CLI; `gitlab.com` gives
-   `gitlab` and `glab`.
+1. **The host part of the origin remote** — if it contains the word `github`
+   (any casing) and not `gitlab`, the tracker is `github` and the CLI is `gh`;
+   if it contains `gitlab` and not `github`, `gitlab` and `glab`. So
+   `github.com`, `ssh.github.com` and an ssh alias such as `github-work` all
+   give `github`. The host part is the authority of a URL (`<scheme>://...`,
+   between `://` and the next `/`, so user and port count), or everything before
+   the first `:` of `git@host:path` and any other scp-style `host:path`. A local
+   path has no host part. The path is never checked, so
+   `git@git.example.com:org/github-x.git` gives no match. A host part with both
+   words, or neither, gives no match and falls through.
 2. **The `issueTracker` key in the configuration below**, for a self-hosted
    instance whose host name gives nothing away.
 3. **Otherwise `unknown`**, and `/ipln` asks you which tracker it is rather than
@@ -168,10 +175,10 @@ repository is created and `git init`-ed on first use.
 ### `issueTracker` — which tracker `/ipln` files into
 
 `github` or `gitlab`. Only consulted when the origin remote's host settles
-nothing, which in practice means a self-hosted instance: `git.example.com` is a
-GitLab to `glab` and a mystery to everyone else, and this key is where you say
-so. Anything else, or no key at all, leaves the tracker `unknown` and `/ipln`
-asks.
+nothing: no match on the host part, or both words in it. In practice that is a
+self-hosted instance: `git.example.com` is a GitLab to `glab` and a mystery to
+everyone else, and this key is where you say so. Anything else, or no key at
+all, leaves the tracker `unknown` and `/ipln` asks.
 
 ### `surface` — how a plan is put in front of you
 

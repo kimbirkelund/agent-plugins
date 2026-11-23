@@ -588,6 +588,7 @@ Describe 'Watch-PlanRequest' {
             $result.ExitCode | Should -Not -Be 0;
             $result.Lines.Count | Should -Be 0;
             $result.Stderr | Should -Match '(?s)issue tracker of.*is unknown';
+            $result.Stderr | Should -Match 'host part contains github or gitlab';
         }
 
         It 'throws when the CLI is missing' {

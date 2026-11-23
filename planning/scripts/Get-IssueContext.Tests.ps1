@@ -160,6 +160,88 @@ Describe 'Get-IssueContext' {
         }
     }
 
+    Context 'host part matching' {
+
+        It 'detects github from git@github-work:org/repo.git' {
+            $f = New-Fixture -OriginUrl 'git@github-work:org/repo.git';
+            (Invoke-Context $f).Tracker | Should -Be 'github';
+        }
+
+        It 'detects gitlab from ssh://git@gitlab-work/group/repo.git' {
+            $f = New-Fixture -OriginUrl 'ssh://git@gitlab-work/group/repo.git';
+            (Invoke-Context $f).Tracker | Should -Be 'gitlab';
+        }
+
+        It 'detects gitlab from https://gitlab.company.com:8443/group/repo.git' {
+            $f = New-Fixture -OriginUrl 'https://gitlab.company.com:8443/group/repo.git';
+            (Invoke-Context $f).Tracker | Should -Be 'gitlab';
+        }
+
+        It 'detects github from github-work:org/repo.git' {
+            $f = New-Fixture -OriginUrl 'github-work:org/repo.git';
+            (Invoke-Context $f).Tracker | Should -Be 'github';
+        }
+
+        It 'detects github from git@GitHub-Work:org/repo.git' {
+            $f = New-Fixture -OriginUrl 'git@GitHub-Work:org/repo.git';
+            (Invoke-Context $f).Tracker | Should -Be 'github';
+        }
+
+        It 'detects gitlab from git@gitlab.com:team/github-tools.git' {
+            $f = New-Fixture -OriginUrl 'git@gitlab.com:team/github-tools.git';
+            (Invoke-Context $f).Tracker | Should -Be 'gitlab';
+        }
+
+        It 'gives no host match for git@git.example.com:org/github-x.git and falls back to config then unknown' {
+            $f = New-Fixture -OriginUrl 'git@git.example.com:org/github-x.git';
+            (Invoke-Context $f).Tracker | Should -Be 'unknown';
+            Set-IssueConfig $f '{ "issueTracker": "gitlab" }';
+            (Invoke-Context $f).Tracker | Should -Be 'gitlab';
+        }
+
+        It 'gives no host match for git@github-gitlab-mirror:org/repo.git and falls back to config then unknown' {
+            $f = New-Fixture -OriginUrl 'git@github-gitlab-mirror:org/repo.git';
+            (Invoke-Context $f).Tracker | Should -Be 'unknown';
+            Set-IssueConfig $f '{ "issueTracker": "gitlab" }';
+            (Invoke-Context $f).Tracker | Should -Be 'gitlab';
+        }
+
+        It 'gives no host match for /srv/git/github/repo.git and falls back to config then unknown' {
+            $f = New-Fixture -OriginUrl '/srv/git/github/repo.git';
+            (Invoke-Context $f).Tracker | Should -Be 'unknown';
+            Set-IssueConfig $f '{ "issueTracker": "gitlab" }';
+            (Invoke-Context $f).Tracker | Should -Be 'gitlab';
+        }
+
+        It 'gives no host match for https://git.example.com/github/repo.git and falls back to config then unknown' {
+            $f = New-Fixture -OriginUrl 'https://git.example.com/github/repo.git';
+            (Invoke-Context $f).Tracker | Should -Be 'unknown';
+            Set-IssueConfig $f '{ "issueTracker": "gitlab" }';
+            (Invoke-Context $f).Tracker | Should -Be 'gitlab';
+        }
+
+        It 'gives no host match for file:///srv/github/repo.git and falls back to config then unknown' {
+            $f = New-Fixture -OriginUrl 'file:///srv/github/repo.git';
+            (Invoke-Context $f).Tracker | Should -Be 'unknown';
+            Set-IssueConfig $f '{ "issueTracker": "gitlab" }';
+            (Invoke-Context $f).Tracker | Should -Be 'gitlab';
+        }
+
+        It 'gives no host match for C:\github\repo and falls back to config then unknown' {
+            $f = New-Fixture -OriginUrl 'C:\github\repo';
+            (Invoke-Context $f).Tracker | Should -Be 'unknown';
+            Set-IssueConfig $f '{ "issueTracker": "gitlab" }';
+            (Invoke-Context $f).Tracker | Should -Be 'gitlab';
+        }
+
+        It 'gives no host match for https://github-gitlab.example.com/x and falls back to config then unknown' {
+            $f = New-Fixture -OriginUrl 'https://github-gitlab.example.com/x';
+            (Invoke-Context $f).Tracker | Should -Be 'unknown';
+            Set-IssueConfig $f '{ "issueTracker": "gitlab" }';
+            (Invoke-Context $f).Tracker | Should -Be 'gitlab';
+        }
+    }
+
     Context 'self-hosted hosts' {
 
         It 'falls back to the issueTracker config key for a self-hosted host' {
