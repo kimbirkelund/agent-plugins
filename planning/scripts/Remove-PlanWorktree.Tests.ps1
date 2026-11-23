@@ -52,7 +52,8 @@ Describe 'Remove-PlanWorktree' {
         $r.PSObject.Properties.Name | Should -Not -Contain 'Reason';
         Test-Path $plan | Should -BeFalse;
         Invoke-Git $main @('log', '--format=%s', '-1') | Should -Be 'merged';
-        Invoke-Git $main @('rev-parse', '--verify', 'refs/heads/plan-branch') | Should -Not -BeNullOrEmpty;
+        $r.BranchDeleted | Should -BeTrue;
+        Invoke-Git $main @('branch', '--list', 'plan-branch') | Should -BeNullOrEmpty;
     }
 
     It 'pulls in the target worktree when run from the plan worktree' {
@@ -87,6 +88,8 @@ Describe 'Remove-PlanWorktree' {
         $r.Removed | Should -BeFalse;
         $r.WorktreePath | Should -Be $planReal;
         $r.Reason | Should -Be 'dirty';
+        $r.BranchDeleted | Should -BeFalse;
+        Invoke-Git $main @('branch', '--list', 'plan-branch') | Should -Not -BeNullOrEmpty;
         $r.Message | Should -Not -BeNullOrEmpty;
         Test-Path $plan | Should -BeTrue;
     }
@@ -97,6 +100,8 @@ Describe 'Remove-PlanWorktree' {
         $r.Removed | Should -BeFalse;
         $r.Reason | Should -Be 'remove-failed';
         $r.Message | Should -Match 'lock';
+        $r.BranchDeleted | Should -BeFalse;
+        Invoke-Git $main @('branch', '--list', 'plan-branch') | Should -Not -BeNullOrEmpty;
         Test-Path $plan | Should -BeTrue;
     }
 
@@ -105,6 +110,8 @@ Describe 'Remove-PlanWorktree' {
         $r.WorktreePath | Should -Be $mainReal;
         $r.Removed | Should -BeFalse;
         $r.Reason | Should -Match 'main-worktree';
+        $r.BranchDeleted | Should -BeFalse;
+        Invoke-Git $main @('branch', '--list', 'main') | Should -Not -BeNullOrEmpty;
         Test-Path $main | Should -BeTrue;
     }
 
@@ -113,6 +120,61 @@ Describe 'Remove-PlanWorktree' {
         $r.WorktreePath | Should -BeNullOrEmpty;
         $r.Removed | Should -BeFalse;
         $r.Reason | Should -Be 'no-worktree';
+        $r.BranchDeleted | Should -BeFalse;
+    }
+
+    It 'deletes an unmerged branch when MergedSha is its tip' {
+        Invoke-Git $plan @('commit', '--allow-empty', '-m', 'squashed') | Out-Null;
+        $tip = Invoke-Git $plan @('rev-parse', 'HEAD');
+        $r = Invoke-Script $main @{ Branch = 'plan-branch'; Target = 'main'; MergedSha = $tip };
+        $r.Removed | Should -BeTrue;
+        $r.BranchDeleted | Should -BeTrue;
+        $r.PSObject.Properties.Name | Should -Not -Contain 'Reason';
+        Invoke-Git $main @('branch', '--list', 'plan-branch') | Should -BeNullOrEmpty;
+    }
+
+    It 'keeps a branch with a local commit beyond MergedSha' {
+        Invoke-Git $plan @('commit', '--allow-empty', '-m', 'merged one') | Out-Null;
+        $merged = Invoke-Git $plan @('rev-parse', 'HEAD');
+        Invoke-Git $plan @('commit', '--allow-empty', '-m', 'local only') | Out-Null;
+        $r = Invoke-Script $main @{ Branch = 'plan-branch'; Target = 'main'; MergedSha = $merged };
+        $r.Removed | Should -BeTrue;
+        $r.BranchDeleted | Should -BeFalse;
+        $r.Reason | Should -Match 'branch-not-merged';
+        $r.Message | Should -Not -BeNullOrEmpty;
+        Invoke-Git $main @('branch', '--list', 'plan-branch') | Should -Not -BeNullOrEmpty;
+    }
+
+    It 'keeps an unmerged branch when MergedSha is not passed' {
+        Invoke-Git $plan @('commit', '--allow-empty', '-m', 'squashed') | Out-Null;
+        $r = Invoke-Script $main @{ Branch = 'plan-branch'; Target = 'main' };
+        $r.BranchDeleted | Should -BeFalse;
+        $r.Reason | Should -Be 'branch-not-merged';
+        Invoke-Git $main @('branch', '--list', 'plan-branch') | Should -Not -BeNullOrEmpty;
+    }
+
+    It 'keeps an unmerged branch when MergedSha is a nonexistent object' {
+        Invoke-Git $plan @('commit', '--allow-empty', '-m', 'squashed') | Out-Null;
+        $r = Invoke-Script $main @{ Branch = 'plan-branch'; Target = 'main'; MergedSha = ('deadbeef' * 5) };
+        $r.Removed | Should -BeTrue;
+        $r.BranchDeleted | Should -BeFalse;
+        $r.Reason | Should -Match 'branch-not-merged';
+        Invoke-Git $main @('branch', '--list', 'plan-branch') | Should -Not -BeNullOrEmpty;
+    }
+
+    It 'keeps a branch with no worktree under WhatIf' {
+        Invoke-Git $main @('branch', 'lonely') | Out-Null;
+        $r = Invoke-Script $main @{ Branch = 'lonely'; Target = 'main'; WhatIf = $true };
+        $r.BranchDeleted | Should -BeFalse;
+        Invoke-Git $main @('branch', '--list', 'lonely') | Should -Not -BeNullOrEmpty;
+    }
+
+    It 'deletes an existing branch that has no worktree' {
+        Invoke-Git $main @('branch', 'lonely') | Out-Null;
+        $r = Invoke-Script $main @{ Branch = 'lonely'; Target = 'main' };
+        $r.BranchDeleted | Should -BeTrue;
+        $r.Reason | Should -Be 'no-worktree';
+        Invoke-Git $main @('branch', '--list', 'lonely') | Should -BeNullOrEmpty;
     }
 
     It 'changes nothing under WhatIf' {
@@ -120,7 +182,9 @@ Describe 'Remove-PlanWorktree' {
         $r = Invoke-Script $main @{ Branch = 'plan-branch'; Target = 'main'; WhatIf = $true };
         $r.Pulled | Should -BeFalse;
         $r.Removed | Should -BeFalse;
+        $r.BranchDeleted | Should -BeFalse;
         Test-Path $plan | Should -BeTrue;
+        Invoke-Git $main @('branch', '--list', 'plan-branch') | Should -Not -BeNullOrEmpty;
         Invoke-Git $main @('rev-parse', 'HEAD') | Should -Be $before;
     }
 }
