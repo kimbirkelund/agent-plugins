@@ -550,6 +550,87 @@ Describe 'Watch-PlanRequest' {
             $result.Events[0].Request.HeadSha | Should -Be 'two';
         }
 
+        It 're-arms conflict after a GitHub retarget with the same head sha' {
+            $f = New-Fixture -Forge github;
+            Set-GitHub $f (New-PullRequest -Mergeable CONFLICTING -Sha 'same' -Base 'release') -DefaultBranch 'main';
+            Get-EventNames (Invoke-Watch $f) | Should -Be @('conflict');
+
+            Set-GitHub $f (New-PullRequest -Mergeable CONFLICTING -Sha 'same' -Base 'main');
+            $result = Invoke-Watch $f;
+
+            Get-EventNames $result | Should -Be @('conflict');
+            $result.Events[0].Request.Target | Should -Be 'main';
+            $result.Events[0].Request.TargetIsDefault | Should -BeTrue;
+        }
+
+        It 're-arms conflict after a GitLab retarget with the same head sha' {
+            $f = New-Fixture -Forge gitlab;
+            Set-GitLab $f (New-MergeRequest -Conflicts $true -Sha 'same' -Target 'release');
+            Get-EventNames (Invoke-Watch $f) | Should -Be @('conflict');
+
+            Set-GitLab $f (New-MergeRequest -Conflicts $true -Sha 'same' -Target 'main');
+            $result = Invoke-Watch $f;
+
+            Get-EventNames $result | Should -Be @('conflict');
+            $result.Events[0].Request.Target | Should -Be 'main';
+            $result.Events[0].Request.TargetIsDefault | Should -BeTrue;
+        }
+
+        It 're-arms conflict after a retarget from the default branch to another branch' {
+            $f = New-Fixture -Forge gitlab;
+            Set-GitLab $f (New-MergeRequest -Conflicts $true -Sha 'same' -Target 'main');
+            Get-EventNames (Invoke-Watch $f) | Should -Be @('conflict');
+
+            Set-GitLab $f (New-MergeRequest -Conflicts $true -Sha 'same' -Target 'release');
+            $result = Invoke-Watch $f;
+
+            Get-EventNames $result | Should -Be @('conflict');
+            $result.Events[0].Request.Target | Should -Be 'release';
+            $result.Events[0].Request.TargetIsDefault | Should -BeFalse;
+        }
+
+        It 'keeps conflict suppressed for the same target and head sha' {
+            $f = New-Fixture -Forge gitlab;
+            Set-GitLab $f (New-MergeRequest -Conflicts $true -Sha 'same');
+            Get-EventNames (Invoke-Watch $f) | Should -Be @('conflict');
+            Get-EventNames (Invoke-Watch $f) | Should -Be @('none');
+            Get-EventNames (Invoke-Watch $f) | Should -Be @('none');
+        }
+
+        It 'records Target without emitting when the state file has none' {
+            $f = New-Fixture -Forge gitlab;
+            @{ Conflicts = @('same'); Pipelines = @(); Comments = @() } | ConvertTo-Json | Set-Content -LiteralPath $f.StatePath;
+            Set-GitLab $f (New-MergeRequest -Conflicts $true -Sha 'same' -Target 'main');
+
+            Get-EventNames (Invoke-Watch $f) | Should -Be @('none');
+
+            (Get-Content -Raw $f.StatePath | ConvertFrom-Json).Target | Should -Be 'main';
+        }
+
+        It 'does not repeat pipeline-failed or comments after a retarget' {
+            $f = New-Fixture -Forge github;
+            $checks = @(@{ __typename = 'CheckRun'; name = 'test'; status = 'COMPLETED'; conclusion = 'FAILURE'; detailsUrl = 'u' });
+            $comments = @(@{ id = 'IC_1'; author = @{ login = 'ann' }; body = 'hi'; url = 'u' });
+            Set-GitHub $f (New-PullRequest -Mergeable CONFLICTING -Sha 'same' -Base 'release' -Checks $checks -Comments $comments);
+            Get-EventNames (Invoke-Watch $f) | Should -Be @('conflict', 'pipeline-failed', 'comments');
+
+            Set-GitHub $f (New-PullRequest -Mergeable CONFLICTING -Sha 'same' -Base 'main' -Checks $checks -Comments $comments);
+
+            Get-EventNames (Invoke-Watch $f) | Should -Be @('conflict');
+        }
+
+        It 'prints none and stores the new Target after a retarget without conflict' {
+            $f = New-Fixture -Forge github;
+            Set-GitHub $f (New-PullRequest -Base 'release');
+            Invoke-Watch $f | Out-Null;
+
+            Set-GitHub $f (New-PullRequest -Base 'main');
+            $result = Invoke-Watch $f;
+
+            Get-EventNames $result | Should -Be @('none');
+            (Get-Content -Raw $f.StatePath | ConvertFrom-Json).Target | Should -Be 'main';
+        }
+
         It 'keeps its state in the git directory by default' {
             $f = New-Fixture -Forge gitlab;
             Set-GitLab $f (New-MergeRequest -Conflicts $true);
