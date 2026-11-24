@@ -49,7 +49,11 @@ that.
 - `PSScriptAnalyzerSettings.psd1` (repo root) is the source of truth for
   PowerShell style (Allman braces, 4-space indent, aligned assignments, correct
   casing). Format in place:
-  `Set-Content $f (Invoke-Formatter -ScriptDefinition (Get-Content -Raw $f) -Settings ./PSScriptAnalyzerSettings.psd1) -NoNewline`
+
+  ```pwsh
+  Set-Content $f (Invoke-Formatter -ScriptDefinition (Get-Content -Raw $f) -Settings ./PSScriptAnalyzerSettings.psd1) -NoNewline
+  ```
+
 - `.prettierrc.json` (repo root) wraps Markdown at 80 (`proseWrap: always`);
   JSON and YAML use prettier's defaults.
 - `.markdownlint.jsonc` (repo root) holds the markdownlint rules.
@@ -69,8 +73,18 @@ do, with no rule added or excluded. A finding comes back to Claude as a hook
 error: a PowerShell parse error, any rule the formatter cannot fix, and any
 markdownlint rule `--fix` cannot fix. A problem with a rule is fixed in the
 config (`PSScriptAnalyzerSettings.psd1`, `.markdownlint.jsonc`), never worked
-around in a script. A missing `prettier`, PSScriptAnalyzer or
-`markdownlint-cli2`, an npm/npx failure, or a lint timeout is skipped silently.
+around in a script. A missing `prettier`, PSScriptAnalyzer,
+`PSScriptAnalyzerSettings.psd1` or `markdownlint-cli2`, an npm/npx failure, or a
+lint timeout is skipped silently.
+
+Each of the three scripts takes `-Strict` (off by default; the hooks do not pass
+it). With it, every condition above that is otherwise skipped silently writes
+one line naming the cause and exits 1.
+
+`pwsh -File Scripts/Test-RepositoryFormat.ps1` is the one check for the whole
+repository: it formats and lints every file git tracks (a new file needs
+`git add -N` first), with `-Strict`, and exits 1 if any file changed or any
+finding remains. Formatting is done in place.
 
 ## PowerShell scripts: never dot-source another script
 
@@ -109,7 +123,24 @@ behavior change without a test change is incomplete.
 ```
 
 The runner installs Pester v5 for the current user if it is missing and exits
-non-zero when any test fails. Run it before shipping.
+non-zero when any test or test file fails. Run it before shipping.
+
+## CI pipeline
+
+`.github/workflows/ci.yml` runs on every pull request and on pushes to `main`:
+job `format` runs `Scripts/Test-RepositoryFormat.ps1`, job `test` runs
+`Invoke-PesterTests.ps1`. Pull requests block on the `ci-success` job alone. It
+lists the other jobs in `needs:`, which is maintained by hand: add every new job
+to it, or that job does not block merging.
+
+Tool versions (prettier, markdownlint-cli2, PSScriptAnalyzer, Node) are pinned
+in the workflow-level `env:` of `ci.yml`. Bump a version there, once.
+
+`.github/rulesets/main.json` is the record of the branch ruleset that requires
+`ci-success`. It is applied once, by hand, never by a script or an agent:
+`gh api --method POST repos/{owner}/{repo}/rulesets --input .github/rulesets/main.json`.
+Apply it only after shipping goes through a pull request; before that it blocks
+`Update-ClaudePlugin.ps1`'s direct push to `main`.
 
 ## Skills shared with `~/.claude/skills`
 

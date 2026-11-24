@@ -6,17 +6,22 @@
     Invoke-ScriptAnalyzer, both using PSScriptAnalyzerSettings.psd1 from RepoRoot. A file is
     written back only when the formatter changed it; a UTF-8 BOM is preserved and an empty file
     is skipped. Findings are printed on stdout as "path:line rule message" and the script exits
-    1; otherwise it exits 0. Missing PSScriptAnalyzer or settings file is silent success.
+    1; otherwise it exits 0. Missing PSScriptAnalyzer or settings file is silent success,
+    unless -Strict is given.
 .PARAMETER Path
     Files to format. Relative paths resolve against the current directory. A missing file
     produces a warning and is skipped.
 .PARAMETER RepoRoot
     Repository root. Defaults to one level above this script.
+.PARAMETER Strict
+    Turns each silent skip into a failure: a missing PSScriptAnalyzer or settings file prints
+    one line naming the cause on stdout and the script exits 1.
 #>
 [CmdletBinding()]
 param(
     [string[]]$Path,
-    [string]$RepoRoot = (Join-Path $PSScriptRoot '..')
+    [string]$RepoRoot = (Join-Path $PSScriptRoot '..'),
+    [switch]$Strict
 )
 
 $ErrorActionPreference = 'Stop'
@@ -26,8 +31,25 @@ $settings = Join-Path $root 'PSScriptAnalyzerSettings.psd1'
 $sep = [IO.Path]::DirectorySeparatorChar
 $failures = [System.Collections.Generic.List[string]]::new()
 
-if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer) -or -not (Test-Path -LiteralPath $settings))
+$missing = @()
+if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer))
 {
+    $missing += 'PSScriptAnalyzer module not found'
+}
+
+if (-not (Test-Path -LiteralPath $settings))
+{
+    $missing += "settings file not found: $settings"
+}
+
+if ($missing.Count -gt 0)
+{
+    if ($Strict)
+    {
+        $missing
+        exit 1
+    }
+
     exit 0
 }
 

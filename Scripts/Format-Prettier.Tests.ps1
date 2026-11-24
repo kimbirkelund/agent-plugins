@@ -12,7 +12,8 @@ BeforeAll {
         param(
             [string[]]$Path,
             [hashtable]$Environment = @{},
-            [string]$WorkingDirectory = $script:Repo
+            [string]$WorkingDirectory = $script:Repo,
+            [string]$Extra = ''
         )
 
         $saved = @{}
@@ -25,7 +26,7 @@ BeforeAll {
         try
         {
             $quoted = ($Path | ForEach-Object { "'" + $_.Replace("'", "''") + "'" }) -join ','
-            $command = "Set-Location '$WorkingDirectory'; & '$($script:Script)' -Path @($quoted) -RepoRoot '$($script:Repo)'; exit `$LASTEXITCODE"
+            $command = "Set-Location '$WorkingDirectory'; & '$($script:Script)' -Path @($quoted) -RepoRoot '$($script:Repo)' $Extra; exit `$LASTEXITCODE"
             $output = & $script:Pwsh -NoProfile -Command $command 2>&1
         }
         finally
@@ -122,5 +123,36 @@ Describe 'Format-Prettier' {
         $code | Should -Be 0
         $output | Should -BeNullOrEmpty
         Get-Content $file -Raw | Should -Be '{"a":1}'
+    }
+
+    It 'fails a missing prettier under Strict with a message' {
+        Set-Content (Join-Path $script:Repo 'a.json') '{"a":1}' -NoNewline
+        $bin = Join-Path $TestDrive 'bin-strict'
+        New-Item -ItemType Directory -Path $bin | Out-Null
+        $saved = $env:PATH
+        $env:PATH = $bin
+        try
+        {
+            $command = "Set-Location '$($script:Repo)'; & '$($script:Script)' -Path @('a.json') -RepoRoot '$($script:Repo)' -Strict; exit `$LASTEXITCODE"
+            $output = & $script:Pwsh -NoProfile -Command $command 2>&1
+            $code = $LASTEXITCODE
+        }
+        finally
+        {
+            $env:PATH = $saved
+        }
+
+        $code | Should -Be 1
+        ($output -join "`n") | Should -Match 'prettier not found on PATH'
+    }
+
+    It 'still formats with prettier present under Strict' {
+        $file = Join-Path $script:Repo 'a.json'
+        Set-Content $file '{"a":1}' -NoNewline
+
+        $result = Invoke-FormatPrettier -Path 'a.json' -Extra '-Strict'
+
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -BeNullOrEmpty
     }
 }

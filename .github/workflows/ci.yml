@@ -1,0 +1,80 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: 26.13.1
+  PRETTIER_VERSION: 3.10.1
+  MARKDOWNLINT_CLI2_VERSION: 0.24.2
+  PSSA_VERSION: 1.25.0
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install tools
+        shell: pwsh
+        run: |
+          npm install -g "prettier@$env:PRETTIER_VERSION" "markdownlint-cli2@$env:MARKDOWNLINT_CLI2_VERSION"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Install-Module PSScriptAnalyzer -RequiredVersion $env:PSSA_VERSION -Force -Scope CurrentUser
+          $available = Get-Module -ListAvailable PSScriptAnalyzer | Sort-Object Version -Descending
+          $available | Select-Object Name, Version, Path | Format-Table -AutoSize -Wrap | Out-String -Width 200 | Write-Host
+          if ($available[0].Version -ne [version]$env:PSSA_VERSION) {
+            Write-Host "Highest PSScriptAnalyzer is $($available[0].Version), expected $env:PSSA_VERSION"
+            exit 1
+          }
+      - name: Check formatting and lint
+        shell: pwsh
+        run: pwsh -File Scripts/Test-RepositoryFormat.ps1
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install tools
+        shell: pwsh
+        run: |
+          npm install -g "prettier@$env:PRETTIER_VERSION" "markdownlint-cli2@$env:MARKDOWNLINT_CLI2_VERSION"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Install-Module PSScriptAnalyzer -RequiredVersion $env:PSSA_VERSION -Force -Scope CurrentUser
+          $available = Get-Module -ListAvailable PSScriptAnalyzer | Sort-Object Version -Descending
+          $available | Select-Object Name, Version, Path | Format-Table -AutoSize -Wrap | Out-String -Width 200 | Write-Host
+          if ($available[0].Version -ne [version]$env:PSSA_VERSION) {
+            Write-Host "Highest PSScriptAnalyzer is $($available[0].Version), expected $env:PSSA_VERSION"
+            exit 1
+          }
+      - name: Run Pester tests
+        shell: pwsh
+        run: pwsh -File ./Invoke-PesterTests.ps1
+
+  # The single required check. `needs:` is maintained by hand: GitHub cannot
+  # make a job depend on "every other job", so a job added without being listed
+  # here is not gated. The branch ruleset requires only this job, so listing a
+  # job here is all it takes to make it block merging.
+  ci-success:
+    if: always()
+    needs: [format, test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check results
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS"
+          if ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}; then
+            exit 1
+          fi

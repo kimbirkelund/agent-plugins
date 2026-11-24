@@ -5,8 +5,9 @@
 .DESCRIPTION
     Discovers every *.Tests.ps1 under the script's own directory and runs them
     with Pester v5. Ensures a compatible Pester is available (installs it for
-    the current user if missing). Exits non-zero when any test fails, so it is
-    usable as a CI / pre-commit gate.
+    the current user if missing). Exits non-zero when any test or container
+    (e.g. a file that throws during discovery) fails, so it is usable as a
+    CI / pre-commit gate.
 
 .PARAMETER Path
     Optional path(s) to specific test files or folders to run instead of the
@@ -61,4 +62,6 @@ $config.TestResult.Enabled = $false;
 
 $result = Invoke-Pester -Configuration $config;
 
-exit $result.FailedCount;
+if ($result.FailedCount -gt 0 -or $result.FailedContainersCount -gt 0) { exit 1; }
+
+exit 0;

@@ -184,8 +184,16 @@ BeforeAll {
 
     function Invoke-Watch($Fixture, [string[]]$Extra = @('-Once'), [switch]$DefaultState)
     {
-        $arguments = @('-NoProfile', '-NonInteractive', '-File', $script:ScriptPath) + $Extra;
-        if (-not $DefaultState) { $arguments += @('-StatePath', $Fixture.StatePath) }
+        $scriptArguments = @($Extra);
+        if (-not $DefaultState) { $scriptArguments += @('-StatePath', $Fixture.StatePath) }
+
+        # -Command rather than -File, so the child renders an uncaught error plain and
+        # unwrapped: the default view colours it and wraps it at a console width that differs
+        # between hosts. The exit code is the one -File would give.
+        $quoted = @($scriptArguments | ForEach-Object { if ($_ -match '^-\w+$') { $_ } else { "'" + ($_ -replace "'", "''") + "'" } });
+        $command = "`$ErrorView = 'NormalView'; `$PSStyle.OutputRendering = 'PlainText'; `$global:LASTEXITCODE = 0; " +
+        "& '$($script:ScriptPath -replace "'", "''")' $($quoted -join ' '); exit `$LASTEXITCODE";
+        $arguments = @('-NoProfile', '-NonInteractive', '-Command', $command);
 
         # A child process with its own environment and working directory, killed after a
         # timeout so a watch that never ends fails the test instead of hanging the run.

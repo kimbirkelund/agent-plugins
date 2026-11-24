@@ -1,3 +1,23 @@
+BeforeDiscovery {
+    # Linux cannot set a file's birth time: the CreationTime setter leaves it alone, so a
+    # plan there can never look older than its last write. Probe once, by read-back.
+    $probe = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('n'));
+    try
+    {
+        '' | Set-Content -LiteralPath $probe;
+        (Get-Item -LiteralPath $probe).CreationTime = [datetime]'2001-02-03 04:05';
+        # Mirror the fixture: a later last write must not move the creation time. Without
+        # birth time support the setter writes the last write time, and the creation time is
+        # read back from it, so an immediate read-back alone would look settable.
+        (Get-Item -LiteralPath $probe).LastWriteTime = [datetime]'2001-02-05 06:07';
+        $script:CanSetCreationTime = (Get-Item -LiteralPath $probe).CreationTime.Date -eq [datetime]'2001-02-03';
+    }
+    finally
+    {
+        Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue;
+    }
+}
+
 BeforeAll {
     $script:ScriptPath = Join-Path $PSScriptRoot 'Migrate-Plan.ps1';
 
@@ -63,7 +83,15 @@ BeforeAll {
             $f.LastWriteTime = [datetime]'2026-07-06 17:00';
         }
 
+        # The date the plan is filed under: its creation time where the platform kept it,
+        # otherwise the last write time the script falls back to.
+        # The tests that use it pass either way, so they rely on 'dates the file from when the
+        # plan was written' running wherever the probe says CreationTime can be set: do not
+        # skip or loosen that test any further.
+        $date = if ($NoPlan -or (Get-Item -LiteralPath $planPath).CreationTime.Date -eq [datetime]'2026-07-04') { '2026-07-04' } else { '2026-07-06' };
+
         return [pscustomobject]@{
+            Date      = $date
             Base      = $base
             RepoRoot  = $repoRoot
             PlansRepo = $plansRepo
@@ -119,7 +147,9 @@ Describe 'Migrate-Plan' {
             Test-Path -LiteralPath $result.Destination | Should -BeTrue;
         }
 
-        It 'dates the file from when the plan was written, not from today' {
+        # Skipped where the platform cannot set a file's birth time (Linux): a plan there
+        # can never be older than its last write, so creation-time precedence cannot be arranged.
+        It 'dates the file from when the plan was written, not from today' -Skip:(-not $CanSetCreationTime) {
             $f = New-Fixture;
             $result = Invoke-Migrate $f;
 
@@ -128,7 +158,10 @@ Describe 'Migrate-Plan' {
 
         It 'falls back to the last write time when creation time is unusable' {
             $f = New-Fixture;
-            (Get-Item -LiteralPath $f.PlanPath).CreationTime = [datetime]'2026-08-01 12:00';
+            $file = Get-Item -LiteralPath $f.PlanPath;
+            $file.CreationTime = [datetime]'2026-08-01 12:00';
+            # Where birth time cannot be set, the setter moves the last write time instead.
+            $file.LastWriteTime = [datetime]'2026-07-06 17:00';
             $result = Invoke-Migrate $f;
 
             Split-Path $result.Destination -Leaf | Should -Be '2026-07-06-rework-the-parser.md';
@@ -139,18 +172,18 @@ Describe 'Migrate-Plan' {
             $result = Invoke-Migrate $f;
 
             $result.Title | Should -Be 'Cache invalidation';
-            Split-Path $result.Destination -Leaf | Should -Be '2026-07-04-cache-invalidation.md';
+            Split-Path $result.Destination -Leaf | Should -Be "$($f.Date)-cache-invalidation.md";
         }
 
         It 'suffixes rather than overwriting when the dated slug is taken' {
             $f = New-Fixture;
             New-Item -ItemType Directory -Path $f.PlanDir -Force | Out-Null;
-            'existing' | Set-Content -LiteralPath (Join-Path $f.PlanDir '2026-07-04-rework-the-parser.md');
+            'existing' | Set-Content -LiteralPath (Join-Path $f.PlanDir "$($f.Date)-rework-the-parser.md");
 
             $result = Invoke-Migrate $f;
 
-            Split-Path $result.Destination -Leaf | Should -Be '2026-07-04-rework-the-parser-2.md';
-            Get-Content -Raw -LiteralPath (Join-Path $f.PlanDir '2026-07-04-rework-the-parser.md') |
+            Split-Path $result.Destination -Leaf | Should -Be "$($f.Date)-rework-the-parser-2.md";
+            Get-Content -Raw -LiteralPath (Join-Path $f.PlanDir "$($f.Date)-rework-the-parser.md") |
                 Should -BeLike 'existing*';
         }
     }
@@ -264,7 +297,7 @@ Describe 'Migrate-Plan' {
         It 'leaves no destination behind when the commit fails' {
             $f = New-Fixture;
             Initialize-BreakingPlansRepo $f;
-            $expected = Join-Path $f.PlanDir '2026-07-04-rework-the-parser.md';
+            $expected = Join-Path $f.PlanDir "$($f.Date)-rework-the-parser.md";
 
             { Invoke-Migrate $f } | Should -Throw;
 
@@ -281,7 +314,7 @@ Describe 'Migrate-Plan' {
             Repair-PlansRepo $f;
             $result = Invoke-Migrate $f;
 
-            Split-Path $result.Destination -Leaf | Should -Be '2026-07-04-rework-the-parser.md';
+            Split-Path $result.Destination -Leaf | Should -Be "$($f.Date)-rework-the-parser.md";
             $result.Committed | Should -BeTrue;
             @(Get-ChildItem -LiteralPath $f.PlanDir -Filter '*.md').Count | Should -Be 1;
             Test-Path -LiteralPath $f.PlanPath | Should -BeFalse;
@@ -343,7 +376,7 @@ Describe 'Migrate-Plan' {
             $f = New-Fixture;
             $result = Invoke-Migrate $f @{ WhatIf = $true };
 
-            Split-Path $result.Destination -Leaf | Should -Be '2026-07-04-rework-the-parser.md';
+            Split-Path $result.Destination -Leaf | Should -Be "$($f.Date)-rework-the-parser.md";
             $result.Title | Should -Be 'rework the parser';
         }
     }
