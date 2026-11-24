@@ -11,7 +11,8 @@
       no-request       no request exists for the branch                 (ends the watch)
       merged           the request was merged                           (ends the watch)
       closed           the request was closed without merging           (ends the watch)
-      conflict         the request conflicts with its target; once per head sha
+      conflict         the request conflicts with its target; once per head sha, and
+                       again after the request is retargeted
       pipeline-failed  the head sha's pipeline or checks failed; once per pipeline id
       comments         review comments or discussion notes not emitted before
 
@@ -26,7 +27,11 @@
     Resolved, Url); every other event carries an empty Comments list.
 
     What was emitted is recorded in a state file, so a restarted watch does not repeat an
-    event. An event is marked as emitted when it is printed.
+    event. An event is marked as emitted when it is printed. The state also records the
+    request's target branch (Target). When the target differs from the recorded one, the
+    conflicts already emitted are forgotten, so a request that is still conflicted after a
+    retarget prints `conflict` again for the same head sha. A state file without Target
+    only gets it recorded; nothing is forgotten.
 
     The tracker and its CLI come from Get-IssueContext.ps1, called as a command. GitHub is
     read with `gh pr view`, `gh api graphql --paginate` (inline review threads, every
@@ -369,7 +374,7 @@ function Get-GitLabSnapshot
 
 function Read-State
 {
-    $state = [pscustomobject]@{ Conflicts = @(); Pipelines = @(); Comments = @() };
+    $state = [pscustomobject]@{ Conflicts = @(); Pipelines = @(); Comments = @(); Target = $null };
     if (Test-Path -LiteralPath $StatePath -PathType Leaf)
     {
         $saved = Get-Content -Raw -LiteralPath $StatePath | ConvertFrom-Json;
@@ -377,6 +382,7 @@ function Read-State
         {
             $state.$name = @(Get-Prop $saved $name | Where-Object { $null -ne $_ } | ForEach-Object { "$_" });
         }
+        $state.Target = Get-Prop $saved 'Target';
     }
 
     return $state;
@@ -418,6 +424,20 @@ function Invoke-Poll
 
     $state = Read-State;
     $printed = $false;
+
+    # A retarget can create a conflict that the head sha alone does not show, so the
+    # conflicts emitted for the old target no longer count. Target is stored on every poll
+    # that finds a request, even when no event is printed.
+    $target = "$($snapshot.Request.Target)";
+    if ($null -ne $state.Target -and $state.Target -cne $target)
+    {
+        $state.Conflicts = @();
+    }
+    if ($state.Target -cne $target)
+    {
+        $state.Target = $target;
+        Save-State $state;
+    }
 
     $headSha = "$($snapshot.Request.HeadSha)";
     if ($snapshot.Conflicted -and $state.Conflicts -notcontains $headSha)

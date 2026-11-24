@@ -174,7 +174,8 @@ gets every verdict with its reason. Each comment is one item in the run summary.
 #### `conflict`
 
 **`Request.TargetIsDefault` false**: report the conflict and keep watching.
-Nothing is rebased.
+Nothing is rebased. When the request is later retargeted and still conflicts,
+the conflict is handled again (see below).
 
 **`Request.TargetIsDefault` true**, with `<default>` being `Request.Target`:
 
@@ -199,8 +200,10 @@ Nothing is rebased.
 7. Otherwise report that the branch is rebased and must be force-pushed by the
    user. You do not push.
 
-Either way the watch keeps running. A `conflict` comes again only for a new head
-sha, which a force-push from the user produces.
+Either way the watch keeps running. A `conflict` comes again for a new head sha,
+which a force-push from the user produces, and also when the request's target
+branch changes. You then handle it as a new event under the `TargetIsDefault` it
+carries. Each occurrence is its own item in the run summary.
 
 **While the rebased branch waits for the user's force-push**, a fix for
 `pipeline-failed` or `comments` is committed locally and not pushed. Its summary
