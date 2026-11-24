@@ -1,6 +1,21 @@
 BeforeAll {
     $script:ScriptPath = Join-Path $PSScriptRoot 'Resolve-PlanBranch.ps1';
 
+    # One git config for the whole file, so no repository needs its own identity or
+    # commit.gpgsign setting and the developer's ~/.gitconfig is never read.
+    $script:SavedGitConfigGlobal = $env:GIT_CONFIG_GLOBAL;
+    $gitConfig = Join-Path $TestDrive 'gitconfig';
+    Set-Content -LiteralPath $gitConfig -Value "[user]`n`tname = Test User`n`temail = test@example.com`n[commit]`n`tgpgsign = false`n";
+    $env:GIT_CONFIG_GLOBAL = $gitConfig;
+
+    # The committed repository, built once and copied per test; never handed to a test.
+    $script:RepoTemplate = Join-Path $TestDrive 'template';
+    New-Item -ItemType Directory -Path $script:RepoTemplate | Out-Null;
+    'code' | Set-Content -LiteralPath (Join-Path $script:RepoTemplate 'file.txt');
+    git -C $script:RepoTemplate init --quiet --initial-branch=main;
+    git -C $script:RepoTemplate add -A;
+    git -C $script:RepoTemplate commit --quiet -m 'initial';
+
     function New-Fixture
     {
         $base = Join-Path $TestDrive ([guid]::NewGuid().ToString('n').Substring(0, 8));
@@ -25,12 +40,9 @@ BeforeAll {
         $env:GIT_COMMITTER_NAME = 'Test User';
         $env:GIT_COMMITTER_EMAIL = 'test@example.com';
 
-        New-Item -ItemType Directory -Path $repoRoot, $planDir -Force | Out-Null;
-        'code' | Set-Content -LiteralPath (Join-Path $repoRoot 'file.txt');
-        git -C $repoRoot init --quiet --initial-branch=main;
-        git -C $repoRoot config commit.gpgsign false;
-        git -C $repoRoot add -A;
-        git -C $repoRoot commit --quiet -m 'initial';
+        New-Item -ItemType Directory -Path $planDir -Force | Out-Null;
+        # A fresh copy of the template repository.
+        Copy-Item -LiteralPath $script:RepoTemplate -Destination $repoRoot -Recurse;
 
         return [pscustomobject]@{
             Base     = $base
@@ -55,6 +67,10 @@ BeforeAll {
         if ($Branch) { $params['Branch'] = $Branch }
         return (& $script:ScriptPath @params | ConvertFrom-Json);
     }
+}
+
+AfterAll {
+    $env:GIT_CONFIG_GLOBAL = $script:SavedGitConfigGlobal;
 }
 
 Describe 'Resolve-PlanBranch' {

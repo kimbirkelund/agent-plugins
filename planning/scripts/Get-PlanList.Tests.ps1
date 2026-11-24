@@ -1,6 +1,32 @@
 BeforeAll {
     $script:ScriptPath = Join-Path $PSScriptRoot 'Get-PlanList.ps1';
 
+    # One git config for the whole file, so no repository needs its own identity or
+    # commit.gpgsign setting and the developer's ~/.gitconfig is never read.
+    $script:SavedGitConfigGlobal = $env:GIT_CONFIG_GLOBAL;
+    $gitConfig = Join-Path $TestDrive 'gitconfig';
+    Set-Content -LiteralPath $gitConfig -Value "[user]`n`tname = Test User`n`temail = test@example.com`n[commit]`n`tgpgsign = false`n";
+    $env:GIT_CONFIG_GLOBAL = $gitConfig;
+
+    function New-RepoTemplate
+    {
+        param([string]$Path, [string]$Branch)
+
+        New-Item -ItemType Directory -Path $Path -Force | Out-Null;
+        'code' | Set-Content -LiteralPath (Join-Path $Path 'file.txt');
+        git -C $Path init --quiet --initial-branch=$Branch;
+        git -C $Path add -A;
+        git -C $Path commit --quiet -m 'initial';
+        git -C $Path remote add origin 'git@gitlab-test:group/widget.git';
+    }
+
+    # The template repository for the default branch, built once and copied per test;
+    # never handed to a test.
+    $script:RepoTemplates = @{};
+    $dir = Join-Path $TestDrive 'template-main';
+    New-RepoTemplate -Path $dir -Branch 'main';
+    $script:RepoTemplates['main'] = $dir;
+
     function New-Fixture
     {
         param([string]$Branch = 'main')
@@ -11,17 +37,19 @@ BeforeAll {
         $plansRepo = Join-Path $codeRoot 'plans';
         $configHome = Join-Path $base 'config';
 
-        New-Item -ItemType Directory -Path $repoRoot -Force | Out-Null;
+        New-Item -ItemType Directory -Path $codeRoot -Force | Out-Null;
         New-Item -ItemType Directory -Path $configHome -Force | Out-Null;
-        'code' | Set-Content -LiteralPath (Join-Path $repoRoot 'file.txt');
 
-        git -C $repoRoot init --quiet --initial-branch=$Branch;
-        git -C $repoRoot config user.name 'Test User';
-        git -C $repoRoot config user.email 'test@example.com';
-        git -C $repoRoot config commit.gpgsign false;
-        git -C $repoRoot add -A;
-        git -C $repoRoot commit --quiet -m 'initial';
-        git -C $repoRoot remote add origin 'git@gitlab-test:group/widget.git';
+        # A fresh copy of the template for this branch; its origin URL holds no path.
+        $template = $script:RepoTemplates[$Branch];
+        if ($template)
+        {
+            Copy-Item -LiteralPath $template -Destination $repoRoot -Recurse;
+        }
+        else
+        {
+            New-RepoTemplate -Path $repoRoot -Branch $Branch;
+        }
 
         $script:SavedEnv = @{
             XDG_CONFIG_HOME   = $env:XDG_CONFIG_HOME
@@ -79,6 +107,10 @@ BeforeAll {
         $arguments = @{ Path = $Fixture.RepoRoot } + $Extra;
         return (& $script:ScriptPath @arguments | ConvertFrom-Json);
     }
+}
+
+AfterAll {
+    $env:GIT_CONFIG_GLOBAL = $script:SavedGitConfigGlobal;
 }
 
 Describe 'Get-PlanList' {

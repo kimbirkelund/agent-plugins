@@ -1,6 +1,34 @@
 BeforeAll {
     $script:ScriptPath = Join-Path $PSScriptRoot 'Get-PlanContext.ps1';
 
+    # One git config for the whole file, so no repository needs its own identity or
+    # commit.gpgsign setting and the developer's ~/.gitconfig is never read.
+    $script:SavedGitConfigGlobal = $env:GIT_CONFIG_GLOBAL;
+    $gitConfig = Join-Path $TestDrive 'gitconfig';
+    Set-Content -LiteralPath $gitConfig -Value "[user]`n`tname = Test User`n`temail = test@example.com`n[commit]`n`tgpgsign = false`n";
+    $env:GIT_CONFIG_GLOBAL = $gitConfig;
+
+    function New-RepoTemplate
+    {
+        param([string]$Path, [string]$Branch)
+
+        New-Item -ItemType Directory -Path $Path -Force | Out-Null;
+        'code' | Set-Content -LiteralPath (Join-Path $Path 'file.txt');
+        git -C $Path init --quiet --initial-branch=$Branch;
+        git -C $Path add -A;
+        git -C $Path commit --quiet -m 'initial';
+    }
+
+    # One template repository per branch the tests use, built once and copied per test;
+    # never handed to a test.
+    $script:RepoTemplates = @{};
+    foreach ($branch in 'main', 'kbi/feature')
+    {
+        $dir = Join-Path $TestDrive "template-$($branch -replace '/', '-')";
+        New-RepoTemplate -Path $dir -Branch $branch;
+        $script:RepoTemplates[$branch] = $dir;
+    }
+
     function New-Fixture
     {
         param(
@@ -18,18 +46,27 @@ BeforeAll {
         $plansRepo = Join-Path $codeRoot 'plans';
         $configHome = Join-Path $base 'config';
 
-        New-Item -ItemType Directory -Path $repoRoot -Force | Out-Null;
+        New-Item -ItemType Directory -Path $codeRoot -Force | Out-Null;
         New-Item -ItemType Directory -Path $configHome -Force | Out-Null;
-        'code' | Set-Content -LiteralPath (Join-Path $repoRoot 'file.txt');
 
-        if (-not $NoGit)
+        if ($NoGit)
         {
-            git -C $repoRoot init --quiet --initial-branch=$Branch;
-            git -C $repoRoot config user.name 'Test User';
-            git -C $repoRoot config user.email 'test@example.com';
-            git -C $repoRoot config commit.gpgsign false;
-            git -C $repoRoot add -A;
-            git -C $repoRoot commit --quiet -m 'initial';
+            New-Item -ItemType Directory -Path $repoRoot -Force | Out-Null;
+            'code' | Set-Content -LiteralPath (Join-Path $repoRoot 'file.txt');
+        }
+        else
+        {
+            # A fresh copy of the template for this branch. The origin URL is not a fixture
+            # path, so it is added to the copy rather than built into a template per URL.
+            $template = $script:RepoTemplates[$Branch];
+            if ($template)
+            {
+                Copy-Item -LiteralPath $template -Destination $repoRoot -Recurse;
+            }
+            else
+            {
+                New-RepoTemplate -Path $repoRoot -Branch $Branch;
+            }
             if (-not $NoOrigin) { git -C $repoRoot remote add origin $OriginUrl }
         }
 
@@ -79,6 +116,10 @@ BeforeAll {
         $args = @{ Path = $Fixture.RepoRoot } + $Extra;
         return (& $script:ScriptPath @args | ConvertFrom-Json);
     }
+}
+
+AfterAll {
+    $env:GIT_CONFIG_GLOBAL = $script:SavedGitConfigGlobal;
 }
 
 Describe 'Get-PlanContext' {
