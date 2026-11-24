@@ -49,7 +49,11 @@ that.
 - `PSScriptAnalyzerSettings.psd1` (repo root) is the source of truth for
   PowerShell style (Allman braces, 4-space indent, aligned assignments, correct
   casing). Format in place:
-  `Set-Content $f (Invoke-Formatter -ScriptDefinition (Get-Content -Raw $f) -Settings ./PSScriptAnalyzerSettings.psd1) -NoNewline`
+
+  ```pwsh
+  Set-Content $f (Invoke-Formatter -ScriptDefinition (Get-Content -Raw $f) -Settings ./PSScriptAnalyzerSettings.psd1) -NoNewline
+  ```
+
 - `.prettierrc.json` (repo root) wraps Markdown at 80 (`proseWrap: always`);
   JSON and YAML use prettier's defaults.
 - `.markdownlint.jsonc` (repo root) holds the markdownlint rules.
