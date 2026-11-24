@@ -109,7 +109,9 @@ How the monitor ends decides what you do:
   case that restarts it. The state file in the worktree's git directory records
   what was already emitted, so a restart repeats nothing.
 - **The script exits non-zero** — it threw at startup (unknown tracker, missing
-  CLI, not a repository, and so on). Report its stderr and end.
+  CLI, not a repository, and so on). Report its stderr and end. The run has
+  ended, so this turn prints the final run summary as _End every turn of an
+  active run with the run summary_ says.
 - **The script exits after a terminal event** (`merged`, `closed`, `no-request`)
   — handle that event below. Never restart the monitor after it.
 
@@ -122,7 +124,9 @@ not stop anything. In this order:
 3. Name every event you received but did not finish handling. Each was marked as
    emitted when it was printed and will not come again; a new `/fnsh` resumes
    the watch from the state file.
-4. Do not start the monitor again.
+4. Do not start the monitor again. The run has ended: this turn ends with the
+   final run summary, as _End every turn of an active run with the run summary_
+   says, and no later turn prints a run summary.
 
 ### 3. Act on each event
 
@@ -136,7 +140,9 @@ the `comments` event; it is empty on every other.
 
 #### `no-request`
 
-Report that the branch has no request, and end. `/fnsh` does not create one.
+Report that the branch has no request, and end. `/fnsh` does not create one. The
+run has ended, so this turn prints the final run summary as _End every turn of
+an active run with the run summary_ says.
 
 #### `pipeline-failed`
 
@@ -242,21 +248,37 @@ and not yet handled is not handled either; each gets a summary item marked
      path, `{repo}` by `RepoRoot` from `Remove-PlanWorktree.ps1`, and `{branch}`
      by the plan's branch.
    - **absent** — invoke nothing, and say nothing about it.
-4. End.
+4. End. The run has ended, so this turn prints the final run summary as _End
+   every turn of an active run with the run summary_ says.
 
 The session's working directory may be gone after the removal. Start every
 command after it with `cd` to `RepoRoot` from `Remove-PlanWorktree.ps1`.
 
 #### `closed`
 
-Report that the request was closed without a merge, and end.
+Report that the request was closed without a merge, and end. The run has ended,
+so this turn prints the final run summary as _End every turn of an active run
+with the run summary_ says.
 
-### 4. End every turn with the run summary
+### 4. End every turn of an active run with the run summary
 
-Every turn ends with the full run summary. It covers everything since this
-`/fnsh` started, not only the turn just taken, and is repeated in full each
-time. It is a numbered list with one item per thing handled: a pipeline failure,
-a single review comment, a conflict. Each item says:
+The run is active from the first start of the monitor until it reaches an end
+state. The end states are:
+
+- the user posts a prompt, which stops the monitor;
+- the script exits non-zero at startup;
+- a `no-request` event;
+- a `merged` event;
+- a `closed` event.
+
+A monitor timeout and restart does not end it, and neither does an item that
+failed its two fix rounds: the watch keeps going.
+
+Every turn while the run is active ends with the full run summary. It covers
+everything since this `/fnsh` started, not only the turn just taken, and is
+repeated in full each time. It is a numbered list with one item per thing
+handled: a pipeline failure, a single review comment, a conflict. Each item
+says:
 
 - what it was;
 - what was fixed and why, or why nothing was fixed (for a comment: its verdict
@@ -268,6 +290,11 @@ An item keeps its number for the whole run and new items take the next number,
 so the user can ask about "item 3". The list is session state: a new `/fnsh`
 starts again at 1. An event still in progress is an item too, marked as in
 progress.
+
+The turn that ends the run prints the summary once more, marked final. After
+that turn no turn prints a run summary, whatever it is about. The summaries
+earlier in the conversation are history, not a pattern to continue. Printing
+resumes only when a new `/fnsh` starts a new run.
 
 ## Committing and pushing
 
