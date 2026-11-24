@@ -8,7 +8,8 @@ BeforeAll {
         param(
             [string[]]$Path,
             [hashtable]$Environment = @{},
-            [string]$WorkingDirectory = $script:Repo
+            [string]$WorkingDirectory = $script:Repo,
+            [string]$Extra = ''
         )
 
         $cwd = $WorkingDirectory
@@ -24,7 +25,7 @@ BeforeAll {
         {
             $quoted = ($Path | ForEach-Object { "'" + $_.Replace("'", "''") + "'" }) -join ','
             $prefix = $Environment.ContainsKey('PSModulePath') ? "`$env:PSModulePath = '$($Environment['PSModulePath'])'; " : ''
-            $command = "${prefix}Set-Location '$cwd'; & '$($script:Script)' -Path @($quoted) -RepoRoot '$($script:Repo)'; exit `$LASTEXITCODE"
+            $command = "${prefix}Set-Location '$cwd'; & '$($script:Script)' -Path @($quoted) -RepoRoot '$($script:Repo)' $Extra; exit `$LASTEXITCODE"
             $output = & $script:Pwsh -NoProfile -Command $command 2>&1
         }
         finally
@@ -171,6 +172,27 @@ Describe 'Format-PowerShell' {
 
         $result.ExitCode | Should -Be 0
         $result.Output | Should -BeNullOrEmpty
+    }
+
+    It 'fails a missing PSScriptAnalyzer under Strict with a message' {
+        $empty = Join-Path $TestDrive 'no-modules-strict'
+        New-Item -ItemType Directory -Path $empty | Out-Null
+        Set-Content (Join-Path $script:Repo 'm.ps1') 'gci' -NoNewline
+
+        $result = Invoke-FormatPowerShell -Path 'm.ps1' -Extra '-Strict' -Environment @{ PSModulePath = $empty }
+
+        $result.ExitCode | Should -Be 1
+        $result.Output | Should -Match 'PSScriptAnalyzer module not found'
+    }
+
+    It 'fails a missing settings file under Strict with a message' {
+        Remove-Item (Join-Path $script:Repo 'PSScriptAnalyzerSettings.psd1')
+        Set-Content (Join-Path $script:Repo 'm.ps1') 'gci' -NoNewline
+
+        $result = Invoke-FormatPowerShell -Path 'm.ps1' -Extra '-Strict'
+
+        $result.ExitCode | Should -Be 1
+        $result.Output | Should -Match 'settings file not found'
     }
 
     It 'reports only the failing file among several' {
