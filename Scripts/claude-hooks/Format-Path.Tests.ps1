@@ -1,6 +1,5 @@
 BeforeAll {
     $script:Script = Join-Path $PSScriptRoot 'Format-Path.ps1'
-    $script:Pwsh = (Get-Command pwsh -CommandType Application | Select-Object -First 1).Source
     $script:Settings = Join-Path $PSScriptRoot '../../PSScriptAnalyzerSettings.psd1'
 
     # Spy scripts standing in for the three format scripts. Each logs one line per call,
@@ -51,20 +50,83 @@ exit 0
             [Environment]::SetEnvironmentVariable($name, $Environment[$name])
         }
 
+        # Runs the script in this process instead of a child pwsh -Command: stdout is the
+        # pipeline plus [Console]::Out, stderr is discarded as the child's 2>$null did, and
+        # everything the call can change is restored afterwards.
+        $savedLocation = Get-Location
+        $savedPath = $env:PATH
+        $savedOut = [Console]::Out
+        $savedError = [Console]::Error
+        $savedIn = [Console]::In
+        $savedEncoding = [Console]::OutputEncoding
+        $savedPreference = $ErrorActionPreference
+        $savedExitCode = Get-Variable LASTEXITCODE -Scope Global -ErrorAction Ignore
+        $out = [IO.StringWriter]::new()
+        $output = [System.Collections.Generic.List[string]]::new()
         try
         {
-            $quoted = ($Path | ForEach-Object { "'" + $_.Replace("'", "''") + "'" }) -join ','
-            $extra = $ScriptRoot ? " -ScriptRoot '$ScriptRoot'" : ''
-            $command = "& '$($script:Script)' -Path @($quoted) -RepoRoot '$($script:Repo)'$extra; exit `$LASTEXITCODE"
-            $output = & $script:Pwsh -NoProfile -Command $command 2>$null
-            $code = $LASTEXITCODE
+            [Console]::SetOut($out)
+            [Console]::SetError([IO.StringWriter]::new())
+            [Console]::SetIn([IO.StringReader]::new(''))
+            # A child pwsh starts without strict mode; the runner sets it, so turn it off
+            # for this function scope only.
+            Set-StrictMode -Off
+            $ErrorActionPreference = 'Continue'
+            $global:LASTEXITCODE = 0
+            $arguments = @{ Path = $Path; RepoRoot = $script:Repo }
+            if ($ScriptRoot)
+            {
+                $arguments.ScriptRoot = $ScriptRoot
+            }
+
+            try
+            {
+                # A child pwsh -Command with 2>$null dropped only errors; warning, verbose,
+                # debug and host lines still reached its stdout, so they stay in the output.
+                & $script:Script @arguments *>&1 | ForEach-Object {
+                    switch ($_)
+                    {
+                        { $_ -is [System.Management.Automation.ErrorRecord] } { break }
+                        { $_ -is [System.Management.Automation.WarningRecord] } { $output.Add("WARNING: $($_.Message)"); break }
+                        { $_ -is [System.Management.Automation.VerboseRecord] } { $output.Add("VERBOSE: $($_.Message)"); break }
+                        { $_ -is [System.Management.Automation.DebugRecord] } { $output.Add("DEBUG: $($_.Message)"); break }
+                        default { $output.Add([string]$_) }
+                    }
+                }
+                $code = $global:LASTEXITCODE
+            }
+            catch
+            {
+                $code = 1
+            }
         }
         finally
         {
+            [Console]::SetOut($savedOut)
+            [Console]::SetError($savedError)
+            [Console]::SetIn($savedIn)
+            [Console]::OutputEncoding = $savedEncoding
+            $ErrorActionPreference = $savedPreference
+            if ($savedExitCode)
+            {
+                $global:LASTEXITCODE = $savedExitCode.Value
+            }
+            else
+            {
+                Remove-Variable LASTEXITCODE -Scope Global -ErrorAction Ignore
+            }
+            $env:PATH = $savedPath
+            Set-Location $savedLocation
             foreach ($name in $saved.Keys)
             {
                 [Environment]::SetEnvironmentVariable($name, $saved[$name])
             }
+        }
+
+        $text = $out.ToString()
+        if ($text)
+        {
+            $output.InsertRange(0, [string[]]($text.TrimEnd("`r", "`n") -split "`r?`n"))
         }
 
         [pscustomobject]@{

@@ -1,16 +1,87 @@
 BeforeAll {
     $script:Script = Join-Path $PSScriptRoot 'Format-DirtyFiles.ps1'
     $script:Settings = Join-Path $PSScriptRoot '../../PSScriptAnalyzerSettings.psd1'
-    $script:Pwsh = (Get-Command pwsh -CommandType Application | Select-Object -First 1).Source
     $script:Unformatted = "if (`$true)`n{`nGet-Date`n}"
     $script:Formatted = "if (`$true)`n{`n    Get-Date`n}"
 
     function Invoke-DirtyFiles
     {
+        # Runs the hook in this process instead of a child pwsh -File: stdin comes from a
+        # StringReader, stdout is the pipeline plus [Console]::Out, stderr (the error stream
+        # plus [Console]::Error) goes to the file a child's 2> would have written, and
+        # everything the call can change is restored afterwards.
         $errFile = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
-        $stdout = '' | & pwsh -NoProfile -File $script:Script -RepoRoot $script:Repo 2>$errFile
+        $savedLocation = Get-Location
+        $savedPath = $env:PATH
+        $savedOut = [Console]::Out
+        $savedError = [Console]::Error
+        $savedIn = [Console]::In
+        $savedEncoding = [Console]::OutputEncoding
+        $savedPreference = $ErrorActionPreference
+        $savedExitCode = Get-Variable LASTEXITCODE -Scope Global -ErrorAction Ignore
+        $out = [IO.StringWriter]::new()
+        $err = [IO.StringWriter]::new()
+        $stdout = [System.Collections.Generic.List[string]]::new()
+        try
+        {
+            [Console]::SetOut($out)
+            [Console]::SetError($err)
+            [Console]::SetIn([IO.StringReader]::new(''))
+            # A child pwsh starts without strict mode; the runner sets it, so turn it off
+            # for this function scope only.
+            Set-StrictMode -Off
+            $ErrorActionPreference = 'Continue'
+            $global:LASTEXITCODE = 0
+            try
+            {
+                # A child pwsh -File wrote errors to stderr and warning, verbose, debug and
+                # host lines to stdout, so every stream is merged and sorted the same way.
+                & $script:Script -RepoRoot $script:Repo *>&1 | ForEach-Object {
+                    switch ($_)
+                    {
+                        { $_ -is [System.Management.Automation.ErrorRecord] } { $err.WriteLine($_.ToString()); break }
+                        { $_ -is [System.Management.Automation.WarningRecord] } { $stdout.Add("WARNING: $($_.Message)"); break }
+                        { $_ -is [System.Management.Automation.VerboseRecord] } { $stdout.Add("VERBOSE: $($_.Message)"); break }
+                        { $_ -is [System.Management.Automation.DebugRecord] } { $stdout.Add("DEBUG: $($_.Message)"); break }
+                        default { $stdout.Add([string]$_) }
+                    }
+                }
+                $code = $global:LASTEXITCODE
+            }
+            catch
+            {
+                $err.WriteLine($_.ToString())
+                $code = 1
+            }
+        }
+        finally
+        {
+            [Console]::SetOut($savedOut)
+            [Console]::SetError($savedError)
+            [Console]::SetIn($savedIn)
+            [Console]::OutputEncoding = $savedEncoding
+            $ErrorActionPreference = $savedPreference
+            if ($savedExitCode)
+            {
+                $global:LASTEXITCODE = $savedExitCode.Value
+            }
+            else
+            {
+                Remove-Variable LASTEXITCODE -Scope Global -ErrorAction Ignore
+            }
+            $env:PATH = $savedPath
+            Set-Location $savedLocation
+        }
+
+        $text = $out.ToString()
+        if ($text)
+        {
+            $stdout.InsertRange(0, [string[]]($text.TrimEnd("`r", "`n") -split "`r?`n"))
+        }
+
+        Set-Content $errFile $err.ToString() -NoNewline
         [pscustomobject]@{
-            ExitCode = $LASTEXITCODE
+            ExitCode = $code
             Stdout   = ($stdout -join "`n")
             Stderr   = (Get-Content $errFile -Raw)
         }
