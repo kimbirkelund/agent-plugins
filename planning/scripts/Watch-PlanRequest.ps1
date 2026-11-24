@@ -13,6 +13,9 @@
       closed           the request was closed without merging           (ends the watch)
       conflict         the request conflicts with its target; once per head sha, and
                        again after the request is retargeted
+      behind           the request is not conflicted but its head is behind its target
+                       (GitHub mergeStateStatus BEHIND, GitLab need_rebase); once per head
+                       sha, and again after the request is retargeted
       pipeline-failed  the head sha's pipeline or checks failed; once per pipeline id
       comments         review comments or discussion notes not emitted before
 
@@ -22,7 +25,7 @@
 
     Each event carries: Event, Request (Number, Url, State, Target, TargetIsDefault,
     HeadSha), Pipeline (State: none, running, passed or failed; Id; FailedJobs with Name,
-    Id and Url), Conflicted, and Comments. Comments is filled only on the `comments` event
+    Id and Url), Conflicted, Behind, and Comments. Comments is filled only on the `comments` event
     and holds only the comments not emitted before (Id, Author, Body, Path, Line,
     Resolved, Url); every other event carries an empty Comments list.
 
@@ -210,7 +213,7 @@ function New-Comment($Id, $Author, $Body, $Path, $Line, $Resolved, $Url)
 
 function Get-GitHubSnapshot
 {
-    $fields = 'number,url,state,baseRefName,headRefOid,mergeable,statusCheckRollup,comments,reviews';
+    $fields = 'number,url,state,baseRefName,headRefOid,mergeable,mergeStateStatus,statusCheckRollup,comments,reviews';
     $view = Invoke-Cli @('pr', 'view', $Branch, '--json', $fields);
     if ($view.ExitCode -ne 0)
     {
@@ -307,6 +310,7 @@ function Get-GitHubSnapshot
             FailedJobs = @($failedJobs)
         }
         Conflicted = ("$($pr.mergeable)".ToUpperInvariant() -eq 'CONFLICTING')
+        Behind     = ("$(Get-Prop $pr 'mergeStateStatus')".ToUpperInvariant() -eq 'BEHIND')
         Comments   = @($comments)
     };
 }
@@ -386,17 +390,18 @@ function Get-GitLabSnapshot
             FailedJobs = $failedJobs
         }
         Conflicted = [bool](Get-Prop $mr 'has_conflicts')
+        Behind     = ("$(Get-Prop $mr 'detailed_merge_status')".ToLowerInvariant() -eq 'need_rebase')
         Comments   = @($comments)
     };
 }
 
 function Read-State
 {
-    $state = [pscustomobject]@{ Conflicts = @(); Pipelines = @(); Comments = @(); Target = $null };
+    $state = [pscustomobject]@{ Conflicts = @(); Behinds = @(); Pipelines = @(); Comments = @(); Target = $null };
     if (Test-Path -LiteralPath $StatePath -PathType Leaf)
     {
         $saved = Get-Content -Raw -LiteralPath $StatePath | ConvertFrom-Json;
-        foreach ($name in 'Conflicts', 'Pipelines', 'Comments')
+        foreach ($name in 'Conflicts', 'Behinds', 'Pipelines', 'Comments')
         {
             $state.$name = @(Get-Prop $saved $name | Where-Object { $null -ne $_ } | ForEach-Object { "$_" });
         }
@@ -418,6 +423,7 @@ function Write-Event([string]$Name, $Snapshot, $Comments = @())
         Request    = if ($Snapshot) { $Snapshot.Request } else { $null }
         Pipeline   = if ($Snapshot) { $Snapshot.Pipeline } else { $null }
         Conflicted = if ($Snapshot) { $Snapshot.Conflicted } else { $false }
+        Behind     = if ($Snapshot) { $Snapshot.Behind } else { $false }
         Comments   = @($Comments)
     };
     [Console]::Out.WriteLine(($watchEvent | ConvertTo-Json -Depth 6 -Compress));
@@ -450,6 +456,7 @@ function Invoke-Poll
     if ($null -ne $state.Target -and $state.Target -cne $target)
     {
         $state.Conflicts = @();
+        $state.Behinds = @();
     }
     if ($state.Target -cne $target)
     {
@@ -462,6 +469,14 @@ function Invoke-Poll
     {
         Write-Event 'conflict' $snapshot;
         $state.Conflicts = @($state.Conflicts) + $headSha;
+        Save-State $state;
+        $printed = $true;
+    }
+
+    if ($snapshot.Behind -and -not $snapshot.Conflicted -and $state.Behinds -notcontains $headSha)
+    {
+        Write-Event 'behind' $snapshot;
+        $state.Behinds = @($state.Behinds) + $headSha;
         Save-State $state;
         $printed = $true;
     }

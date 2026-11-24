@@ -4,9 +4,9 @@ description:
   Stay with a finished plan's GitHub PR or GitLab MR until it is merged. Watches
   the request continuously, fixes pipeline failures and required review comments
   caused by the branch with pushed `fixup!` commits, reports everything else,
-  rebases on a conflict with the default branch, and after the merge pulls the
-  target, removes the plan's worktree, deletes the local branch and invokes the
-  finish hook. Use when the user types /fnsh.
+  rebases on a conflict with the default branch or when the request is behind
+  it, and after the merge pulls the target, removes the plan's worktree, deletes
+  the local branch and invokes the finish hook. Use when the user types /fnsh.
 argument-hint:
   "[plan key, name or title fragment, or omit for this branch's plan]"
 disable-model-invocation: true
@@ -23,6 +23,7 @@ find the plan ─> refuse unless DONE and on its Branch: ─> background Watch-P
                                                                                          ├─ pipeline-failed ─> fixer classifies ─> caused by branch: fix, verify, fixup!, push
                                                                                          ├─ comments ───────> fixer judges each ─> required: fix, verify, fixup!, push
                                                                                          ├─ conflict ───────> default target: fetch, rebase, fixer resolves, verify, user force-pushes
+                                                                                         ├─ behind ─────────> default target: fetch, rebase, verify, user force-pushes
                                                                                          ├─ merged ─────────> Remove-PlanWorktree ─> finish hook ─> end
                                                                                          └─ closed / no-request ─> report ─> end
 user posts a prompt ─> TaskStop the watch ─> answer ─> name unfinished events ─> do not restart
@@ -147,8 +148,8 @@ arrives while you handle another comes as a new exit and waits its turn.
 
 Every event carries `Event`, `Request` (`Number`, `Url`, `State`, `Target`,
 `TargetIsDefault`, `HeadSha`), `Pipeline` (`State`, `Id`, `FailedJobs` with
-`Name`, `Id`, `Url`), `Conflicted` and `Comments`. `Comments` is filled only on
-the `comments` event; it is empty on every other.
+`Name`, `Id`, `Url`), `Conflicted`, `Behind` and `Comments`. `Comments` is
+filled only on the `comments` event; it is empty on every other.
 
 #### `no-request`
 
@@ -195,7 +196,39 @@ gets every verdict with its reason. Each comment is one item in the run summary.
 running again. Nothing is rebased. When the request is later retargeted and
 still conflicts, the conflict is handled again (see below).
 
-**`Request.TargetIsDefault` true**, with `<default>` being `Request.Target`:
+**`Request.TargetIsDefault` true**: run _The rebase procedure_ below, starting
+at step 1.
+
+Either way the watch stays running. A `conflict` comes again for a new head sha,
+which a force-push from the user produces, and also when the request's target
+branch changes. You then handle it as a new event under the `TargetIsDefault` it
+carries. Each occurrence is its own item in the run summary.
+
+#### `behind`
+
+The request does not conflict, but its head is behind its target. Only a request
+that is not `Conflicted` gets `behind`; a request that is both gets `conflict`.
+
+**`Request.TargetIsDefault` false**: report that the request is behind its
+target. The watch is already running again. Nothing is rebased. When the request
+is later retargeted and is still behind, the event is handled again (see below).
+
+**`Request.TargetIsDefault` true**: run _The rebase procedure_ below, starting
+at step 1. The rebase will normally complete with no conflicts, which takes you
+straight to step 6, and the fixer steps (3 to 5) are not needed. When it does
+stop on conflicts, continue with step 3 as for `conflict`.
+
+Never update the branch on the forge (`gh pr update-branch` adds a merge commit,
+and its `--rebase` form is a force push). The user rebases rather than merges,
+and pushes it themselves.
+
+Either way the watch stays running. A `behind` comes again for a new head sha,
+which a force-push from the user produces, and also when the request's target
+branch changes. Each occurrence is its own item in the run summary.
+
+#### The rebase procedure
+
+Used by `conflict` and `behind`, with `<default>` being `Request.Target`:
 
 1. Record the pre-rebase sha: `git rev-parse HEAD`.
 2. `git fetch origin <default>`, then `git rebase origin/<default>`. Plain,
@@ -218,16 +251,12 @@ still conflicts, the conflict is handled again (see below).
 7. Otherwise report that the branch is rebased and must be force-pushed by the
    user. You do not push.
 
-Either way the watch stays running. A `conflict` comes again for a new head sha,
-which a force-push from the user produces, and also when the request's target
-branch changes. You then handle it as a new event under the `TargetIsDefault` it
-carries. Each occurrence is its own item in the run summary.
-
-**While the rebased branch waits for the user's force-push**, a fix for
-`pipeline-failed` or `comments` is committed locally and not pushed. Its summary
-item says "not pushed: waiting for your force-push". Before each such commit,
-check whether the window is still open: run `git fetch origin <branch>`, since
-the user may force-push from another clone, then
+**While the rebased branch waits for the user's force-push** (after a `conflict`
+or a `behind` rebase alike), a fix for `pipeline-failed` or `comments` is
+committed locally and not pushed. Its summary item says "not pushed: waiting for
+your force-push". Before each such commit, check whether the window is still
+open: run `git fetch origin <branch>`, since the user may force-push from
+another clone, then
 `git rev-list --left-right --count 'origin/<branch>...HEAD'`. The window is
 closed when the left count is zero. When `origin/<branch>` does not exist the
 branch has no upstream, so there is no force-push window and the `-u` push in
@@ -290,8 +319,8 @@ going.
 Every turn while the run is active ends with the full run summary. It covers
 everything since this `/fnsh` started, not only the turn just taken, and is
 repeated in full each time. It is a numbered list with one item per thing
-handled: a pipeline failure, a single review comment, a conflict. Each item
-says:
+handled: a pipeline failure, a single review comment, a conflict, a request that
+is behind. Each item says:
 
 - what it was;
 - what was fixed and why, or why nothing was fixed (for a comment: its verdict
@@ -327,7 +356,7 @@ You do every commit, rebase and push; members never do.
 - Never pull, merge or rebase to get past a rejected push. Report the rejection
   and leave the commit local; its item says it is not pushed.
 - Never squash. No `--autosquash`, no roll-up: the branch is published, and its
-  history is not rewritten except by the conflict rebase above.
+  history is not rewritten except by the rebase procedure above.
 
 ## Rules that bind the session
 
@@ -346,8 +375,8 @@ You do every commit, rebase and push; members never do.
   resolves, approves, merges or closes anything on the forge. The only write is
   `git push`. Verdicts on review comments go to the user in this session.
 - **No force push.** Never `--force`, `--force-with-lease`, `-f` or a `+`
-  refspec. After a conflict rebase the user pushes, and fixes made before that
-  stay local.
+  refspec. After a rebase for `conflict` or `behind` the user pushes, and fixes
+  made before that stay local.
 - **No plan writes.** The plan is `DONE` and stays as it is. Nothing is written
   to it and `Save-Plan.ps1` is never run.
 - **No squash.** `fixup!` commits stay as separate commits on the branch.
