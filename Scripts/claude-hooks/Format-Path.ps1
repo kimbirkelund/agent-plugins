@@ -6,8 +6,12 @@
     are grouped by extension and each group goes, as absolute paths, to one call of the matching
     script in Scripts/: Format-PowerShell.ps1 (.ps1 .psm1 .psd1), Format-Prettier.ps1 (.json
     .jsonc .yml .yaml) or Format-Markdown.ps1 (.md). Unknown extensions are ignored. The stdout
-    of each script that exits 1 is printed and the script exits 1; otherwise it exits 0.
-    Warnings the scripts write to stderr are not part of the result.
+    lines of each script that exits non-zero are split by the "not checked: " prefix. Lines
+    without it are printed under "Format and lint: fix these in the files you just wrote."; lines
+    with it under "Format and lint could not run, so some files were not checked. Tell the user,
+    and ask before installing tools or changing config.". A group with no lines is left out. The
+    script exits 1 when either group has lines, otherwise it exits 0 with no output. Warnings the
+    scripts write to stderr are not part of the result.
 .PARAMETER Path
     Files to format. Relative paths resolve against RepoRoot.
 .PARAMETER RepoRoot
@@ -94,13 +98,28 @@ foreach ($script in $groups.Keys)
     }
     catch
     {
-        $failures.Add("${script} failed: $($_.Exception.Message)")
+        $failures.Add("not checked: ${script} failed: $($_.Exception.Message)")
     }
+}
+
+$notCheckedPrefix = 'not checked: '
+$notChecked = @($failures | Where-Object { $_.StartsWith($notCheckedPrefix, [StringComparison]::Ordinal) })
+$problems = @($failures | Where-Object { -not $_.StartsWith($notCheckedPrefix, [StringComparison]::Ordinal) })
+
+if ($problems.Count -gt 0)
+{
+    'Format and lint: fix these in the files you just wrote.'
+    $problems
+}
+
+if ($notChecked.Count -gt 0)
+{
+    'Format and lint could not run, so some files were not checked. Tell the user, and ask before installing tools or changing config.'
+    $notChecked
 }
 
 if ($failures.Count -gt 0)
 {
-    $failures
     exit 1
 }
 

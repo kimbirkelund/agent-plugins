@@ -1,6 +1,7 @@
 BeforeAll {
     $script:Script = Join-Path $PSScriptRoot 'Format-DirtyFiles.ps1'
     $script:Settings = Join-Path $PSScriptRoot '../../PSScriptAnalyzerSettings.psd1'
+    $script:Pwsh = (Get-Command pwsh -CommandType Application | Select-Object -First 1).Source
     $script:Unformatted = "if (`$true)`n{`nGet-Date`n}"
     $script:Formatted = "if (`$true)`n{`n    Get-Date`n}"
 
@@ -109,6 +110,36 @@ Describe 'Format-DirtyFiles' {
 
         $result.ExitCode | Should -Be 2
         $result.Stderr | Should -Match 'probe\.ps1:1 PSAvoidUsingCmdletAliases'
+        $result.Stderr | Should -Match ([regex]::Escape('Format and lint: fix these in the files you just wrote.'))
+    }
+
+    It 'exits 2 with the could-not-run instruction when a tool is missing from PATH' -Skip:$IsWindows {
+        Set-Content (Join-Path $script:Repo 'a.json') '{"a":1}' -NoNewline
+        $bin = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $bin | Out-Null
+        foreach ($tool in 'git', 'pwsh')
+        {
+            $real = (Get-Command $tool -CommandType Application | Select-Object -First 1).Source
+            $shim = Join-Path $bin $tool
+            Set-Content $shim "#!/bin/sh`nexec '$real' `"`$@`""
+            chmod +x $shim
+        }
+
+        $saved = $env:PATH
+        $env:PATH = $bin
+        try
+        {
+            Get-Command prettier -CommandType Application -ErrorAction SilentlyContinue | Should -BeNullOrEmpty
+            $result = Invoke-DirtyFiles
+        }
+        finally
+        {
+            $env:PATH = $saved
+        }
+
+        $result.ExitCode | Should -Be 2
+        $result.Stderr | Should -Match ([regex]::Escape('Format and lint could not run, so some files were not checked. Tell the user, and ask before installing tools or changing config.'))
+        $result.Stderr | Should -Match 'not checked: prettier not found on PATH'
     }
 
     It 'exits 0 and creates the stamp when there is nothing to format' {

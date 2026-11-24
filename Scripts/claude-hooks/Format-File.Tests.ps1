@@ -1,6 +1,7 @@
 BeforeAll {
     $script:Script = Join-Path $PSScriptRoot 'Format-File.ps1'
     $script:Settings = Join-Path $PSScriptRoot '../../PSScriptAnalyzerSettings.psd1'
+    $script:Pwsh = (Get-Command pwsh -CommandType Application | Select-Object -First 1).Source
 
     function Invoke-FormatFile
     {
@@ -71,7 +72,39 @@ Describe 'Format-File' {
 
         $result.ExitCode | Should -Be 2
         $result.Stderr | Should -Match 'b\.ps1:1 PSAvoidUsingCmdletAliases'
+        $result.Stderr | Should -Match ([regex]::Escape('Format and lint: fix these in the files you just wrote.'))
         $result.Stdout | Should -BeNullOrEmpty
+    }
+
+    It 'exits 2 with the could-not-run instruction when a tool is missing from PATH' -Skip:$IsWindows {
+        $file = Join-Path $script:Repo 'a.json'
+        Set-Content $file '{"a":1}' -NoNewline
+        $json = @{ tool_input = @{ file_path = $file } } | ConvertTo-Json
+        $bin = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $bin | Out-Null
+        foreach ($tool in 'git', 'pwsh')
+        {
+            $real = (Get-Command $tool -CommandType Application | Select-Object -First 1).Source
+            $shim = Join-Path $bin $tool
+            Set-Content $shim "#!/bin/sh`nexec '$real' `"`$@`""
+            chmod +x $shim
+        }
+
+        $saved = $env:PATH
+        $env:PATH = $bin
+        try
+        {
+            Get-Command prettier -CommandType Application -ErrorAction SilentlyContinue | Should -BeNullOrEmpty
+            $result = Invoke-FormatFile -Stdin $json
+        }
+        finally
+        {
+            $env:PATH = $saved
+        }
+
+        $result.ExitCode | Should -Be 2
+        $result.Stderr | Should -Match ([regex]::Escape('Format and lint could not run, so some files were not checked. Tell the user, and ask before installing tools or changing config.'))
+        $result.Stderr | Should -Match 'not checked: prettier not found on PATH'
     }
 
     It 'leaves a file_path outside the repo untouched' {
