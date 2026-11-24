@@ -152,47 +152,25 @@ Describe 'Format-PowerShell' {
         $result.Output | Should -BeNullOrEmpty
     }
 
-    It 'treats a missing PSScriptAnalyzer as success' {
-        $empty = Join-Path $TestDrive 'no-modules'
+    It 'fails a missing PSScriptAnalyzer with a prefixed message' {
+        $empty = Join-Path $TestDrive 'no-modules-strict'
         New-Item -ItemType Directory -Path $empty | Out-Null
-        $file = Join-Path $script:Repo 'm.ps1'
-        Set-Content $file 'gci' -NoNewline
+        Set-Content (Join-Path $script:Repo 'm.ps1') 'gci' -NoNewline
 
         $result = Invoke-FormatPowerShell -Path 'm.ps1' -Environment @{ PSModulePath = $empty }
 
-        $result.ExitCode | Should -Be 0
-        $result.Output | Should -BeNullOrEmpty
+        $result.ExitCode | Should -Be 1
+        $result.Output | Should -Match 'not checked: PSScriptAnalyzer module not found'
     }
 
-    It 'treats a missing settings file as success' {
+    It 'fails a missing settings file with a prefixed message' {
         Remove-Item (Join-Path $script:Repo 'PSScriptAnalyzerSettings.psd1')
         Set-Content (Join-Path $script:Repo 'm.ps1') 'gci' -NoNewline
 
         $result = Invoke-FormatPowerShell -Path 'm.ps1'
 
-        $result.ExitCode | Should -Be 0
-        $result.Output | Should -BeNullOrEmpty
-    }
-
-    It 'fails a missing PSScriptAnalyzer under Strict with a message' {
-        $empty = Join-Path $TestDrive 'no-modules-strict'
-        New-Item -ItemType Directory -Path $empty | Out-Null
-        Set-Content (Join-Path $script:Repo 'm.ps1') 'gci' -NoNewline
-
-        $result = Invoke-FormatPowerShell -Path 'm.ps1' -Extra '-Strict' -Environment @{ PSModulePath = $empty }
-
         $result.ExitCode | Should -Be 1
-        $result.Output | Should -Match 'PSScriptAnalyzer module not found'
-    }
-
-    It 'fails a missing settings file under Strict with a message' {
-        Remove-Item (Join-Path $script:Repo 'PSScriptAnalyzerSettings.psd1')
-        Set-Content (Join-Path $script:Repo 'm.ps1') 'gci' -NoNewline
-
-        $result = Invoke-FormatPowerShell -Path 'm.ps1' -Extra '-Strict'
-
-        $result.ExitCode | Should -Be 1
-        $result.Output | Should -Match 'settings file not found'
+        $result.Output | Should -Match 'not checked: settings file not found'
     }
 
     It 'reports only the failing file among several' {

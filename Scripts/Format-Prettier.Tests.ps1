@@ -101,31 +101,7 @@ Describe 'Format-Prettier' {
         Get-Content $file -Raw | Should -Be "{ `"a`": 1 }`n"
     }
 
-    It 'treats a missing prettier as success' {
-        $file = Join-Path $script:Repo 'a.json'
-        Set-Content $file '{"a":1}' -NoNewline
-        $bin = Join-Path $TestDrive 'bin'
-        New-Item -ItemType Directory -Path $bin | Out-Null
-        $saved = $env:PATH
-        $env:PATH = $bin
-        try
-        {
-            $quoted = "'a.json'"
-            $command = "Set-Location '$($script:Repo)'; & '$($script:Script)' -Path @($quoted) -RepoRoot '$($script:Repo)'; exit `$LASTEXITCODE"
-            $output = & $script:Pwsh -NoProfile -Command $command 2>&1
-            $code = $LASTEXITCODE
-        }
-        finally
-        {
-            $env:PATH = $saved
-        }
-
-        $code | Should -Be 0
-        $output | Should -BeNullOrEmpty
-        Get-Content $file -Raw | Should -Be '{"a":1}'
-    }
-
-    It 'fails a missing prettier under Strict with a message' {
+    It 'fails a missing prettier with a prefixed message' {
         Set-Content (Join-Path $script:Repo 'a.json') '{"a":1}' -NoNewline
         $bin = Join-Path $TestDrive 'bin-strict'
         New-Item -ItemType Directory -Path $bin | Out-Null
@@ -133,7 +109,7 @@ Describe 'Format-Prettier' {
         $env:PATH = $bin
         try
         {
-            $command = "Set-Location '$($script:Repo)'; & '$($script:Script)' -Path @('a.json') -RepoRoot '$($script:Repo)' -Strict; exit `$LASTEXITCODE"
+            $command = "Set-Location '$($script:Repo)'; & '$($script:Script)' -Path @('a.json') -RepoRoot '$($script:Repo)'; exit `$LASTEXITCODE"
             $output = & $script:Pwsh -NoProfile -Command $command 2>&1
             $code = $LASTEXITCODE
         }
@@ -143,14 +119,14 @@ Describe 'Format-Prettier' {
         }
 
         $code | Should -Be 1
-        ($output -join "`n") | Should -Match 'prettier not found on PATH'
+        ($output -join "`n") | Should -Match 'not checked: prettier not found on PATH'
     }
 
-    It 'still formats with prettier present under Strict' {
+    It 'still formats with prettier present' {
         $file = Join-Path $script:Repo 'a.json'
         Set-Content $file '{"a":1}' -NoNewline
 
-        $result = Invoke-FormatPrettier -Path 'a.json' -Extra '-Strict'
+        $result = Invoke-FormatPrettier -Path 'a.json'
 
         $result.ExitCode | Should -Be 0
         $result.Output | Should -BeNullOrEmpty

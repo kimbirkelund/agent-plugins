@@ -7,9 +7,9 @@
     its formatting wins, and markdownlint-cli2 in check mode reports what is left. Findings are
     printed on stdout as "path:line rule message" and the script exits 1; otherwise it exits 0.
     markdownlint-cli2 resolves to the one on PATH, else to "npx --yes markdownlint-cli2".
-    With neither, lint is skipped silently; a missing prettier skips the prettier passes.
-    With -Strict each of these skips, a lint timeout and an npm or npx failure instead print
-    one line naming the cause on stdout and the script exits 1.
+    With neither, lint is skipped; a missing prettier skips the prettier passes. Each of
+    these skips, a lint timeout and an npm or npx failure print a line naming the cause,
+    prefixed "not checked: " (every line of npm output too), on stdout and the script exits 1.
     The markdownlint config is .markdownlint.jsonc in RepoRoot, when present.
 .PARAMETER Path
     Files to format. Relative paths resolve against the current directory. A missing file
@@ -18,17 +18,14 @@
     Repository root. Defaults to one level above this script.
 .PARAMETER LintTimeoutSeconds
     One time budget shared by both markdownlint-cli2 calls. When it runs out the running
-    process is killed and lint is skipped silently, like a missing tool. Defaults to 80, under
+    process is killed and lint is skipped, like a missing tool. Defaults to 80, under
     the 120 s hook timeout.
-.PARAMETER Strict
-    Turns every silent skip into a failure and is passed on to Format-Prettier.ps1.
 #>
 [CmdletBinding()]
 param(
     [string[]]$Path,
     [string]$RepoRoot = (Join-Path $PSScriptRoot '..'),
-    [int]$LintTimeoutSeconds = 80,
-    [switch]$Strict
+    [int]$LintTimeoutSeconds = 80
 )
 
 $ErrorActionPreference = 'Stop'
@@ -96,7 +93,7 @@ function Invoke-Prettier
 {
     param([string]$File)
 
-    $output = & $prettierScript -Path $File -RepoRoot $root -Strict:$Strict
+    $output = & $prettierScript -Path $File -RepoRoot $root
     if ($LASTEXITCODE -ne 0)
     {
         foreach ($line in $output)
@@ -162,11 +159,11 @@ function Invoke-Linter
 
 $lintClock = [Diagnostics.Stopwatch]::StartNew()
 $goodFiles = [System.Collections.Generic.List[string]]::new()
-$prettierMissing = $Strict -and -not (Get-Command prettier -CommandType Application -ErrorAction SilentlyContinue)
+$prettierMissing = -not (Get-Command prettier -CommandType Application -ErrorAction SilentlyContinue)
 if ($prettierMissing)
 {
     # Reported once here instead of once per file by Format-Prettier.ps1.
-    $failures.Add('prettier not found on PATH')
+    $failures.Add('not checked: prettier not found on PATH')
 }
 else
 {
@@ -179,26 +176,26 @@ else
     }
 }
 
-if ($linter.Count -eq 0 -and $Strict)
+if ($linter.Count -eq 0)
 {
-    $failures.Add('markdownlint-cli2 not found on PATH and npx not found')
+    $failures.Add('not checked: markdownlint-cli2 not found on PATH and npx not found')
 }
 
 if ($linter.Count -gt 0 -and $goodFiles.Count -gt 0)
 {
     $fixRun = Invoke-Linter -Arguments @('--fix')
-    if (-not $fixRun -and $Strict)
+    if (-not $fixRun)
     {
-        $failures.Add($script:LintSkipReason)
+        $failures.Add("not checked: $script:LintSkipReason")
     }
 
     $fixNpmFailure = $fixRun ? @($fixRun.Output | Where-Object { $_ -match 'npm (ERR|error)' }) : @()
-    if ($fixNpmFailure.Count -gt 0 -and $Strict)
+    if ($fixNpmFailure.Count -gt 0)
     {
-        $failures.Add("npm or npx failed before markdownlint-cli2 ran`n$($fixNpmFailure -join "`n")")
+        $failures.Add("not checked: npm or npx failed before markdownlint-cli2 ran`nnot checked: $($fixNpmFailure -join "`nnot checked: ")")
     }
 
-    if ($fixRun -and -not ($fixNpmFailure.Count -gt 0 -and $Strict))
+    if ($fixRun -and $fixNpmFailure.Count -eq 0)
     {
         $remaining = @($goodFiles)
         $goodFiles.Clear()
@@ -211,9 +208,9 @@ if ($linter.Count -gt 0 -and $goodFiles.Count -gt 0)
         }
 
         $run = $goodFiles.Count -gt 0 ? (Invoke-Linter -Arguments @()) : $null
-        if (-not $run -and $Strict -and $goodFiles.Count -gt 0)
+        if (-not $run -and $goodFiles.Count -gt 0)
         {
-            $failures.Add($script:LintSkipReason)
+            $failures.Add("not checked: $script:LintSkipReason")
         }
 
         if ($run)
@@ -230,9 +227,9 @@ if ($linter.Count -gt 0 -and $goodFiles.Count -gt 0)
 
             # npm or npx failing before markdownlint-cli2 runs is a missing tool, not a finding.
             $npmFailure = $run.Output | Where-Object { $_ -match 'npm (ERR|error)' }
-            if ($npmFailure -and $Strict)
+            if ($npmFailure)
             {
-                $failures.Add("npm or npx failed before markdownlint-cli2 ran`n$($npmFailure -join "`n")")
+                $failures.Add("not checked: npm or npx failed before markdownlint-cli2 ran`nnot checked: $($npmFailure -join "`nnot checked: ")")
             }
 
             if ($run.ExitCode -ne 0 -and $parsed -eq 0 -and -not $npmFailure)

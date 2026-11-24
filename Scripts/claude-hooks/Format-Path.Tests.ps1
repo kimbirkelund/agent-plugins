@@ -20,6 +20,12 @@ if ($env:SPY_FAIL -split ',' -contains $name)
     exit 1
 }
 
+if ($env:SPY_NOT_CHECKED -split ',' -contains $name)
+{
+    "not checked: tool missing for $name"
+    exit 1
+}
+
 exit 0
 '@
         foreach ($name in 'Format-PowerShell.ps1', 'Format-Prettier.ps1', 'Format-Markdown.ps1')
@@ -192,7 +198,26 @@ Describe 'Format-Path' {
             $result = Invoke-FormatPath -Path 'a.ps1' -Environment ($script:Env + @{ SPY_FAIL = 'Format-PowerShell.ps1' }) -ScriptRoot $script:Spies
 
             $result.ExitCode | Should -Be 1
-            $result.Output | Should -Be 'failure from Format-PowerShell.ps1'
+            $result.Output | Should -Be "Format and lint: fix these in the files you just wrote.`nfailure from Format-PowerShell.ps1"
+        }
+
+        It 'prints only the could-not-run group when every line is prefixed' {
+            Set-Content (Join-Path $script:Repo 'a.ps1') 'x' -NoNewline
+
+            $result = Invoke-FormatPath -Path 'a.ps1' -Environment ($script:Env + @{ SPY_NOT_CHECKED = 'Format-PowerShell.ps1' }) -ScriptRoot $script:Spies
+
+            $result.ExitCode | Should -Be 1
+            $result.Output | Should -Be "Format and lint could not run, so some files were not checked. Tell the user, and ask before installing tools or changing config.`nnot checked: tool missing for Format-PowerShell.ps1"
+        }
+
+        It 'prints both groups, fix group first, when findings and not-checked lines mix' {
+            Set-Content (Join-Path $script:Repo 'a.ps1') 'x' -NoNewline
+            Set-Content (Join-Path $script:Repo 'b.md') 'x' -NoNewline
+
+            $result = Invoke-FormatPath -Path 'a.ps1', 'b.md' -Environment ($script:Env + @{ SPY_FAIL = 'Format-PowerShell.ps1'; SPY_NOT_CHECKED = 'Format-Markdown.ps1' }) -ScriptRoot $script:Spies
+
+            $result.ExitCode | Should -Be 1
+            $result.Output | Should -Be "Format and lint: fix these in the files you just wrote.`nfailure from Format-PowerShell.ps1`nFormat and lint could not run, so some files were not checked. Tell the user, and ask before installing tools or changing config.`nnot checked: tool missing for Format-Markdown.ps1"
         }
 
         It 'does not report a script that exits 0 alongside a failing one' {
@@ -202,7 +227,7 @@ Describe 'Format-Path' {
             $result = Invoke-FormatPath -Path 'a.ps1', 'b.md' -Environment ($script:Env + @{ SPY_FAIL = 'Format-Markdown.ps1' }) -ScriptRoot $script:Spies
 
             $result.ExitCode | Should -Be 1
-            $result.Output | Should -Be 'failure from Format-Markdown.ps1'
+            $result.Output | Should -Be "Format and lint: fix these in the files you just wrote.`nfailure from Format-Markdown.ps1"
             $result.Calls.Count | Should -Be 2
         }
 
@@ -226,7 +251,7 @@ Describe 'Format-Path' {
             $result = Invoke-FormatPath -Path 'a.ps1' -Environment $script:Env -ScriptRoot $script:Spies
 
             $result.ExitCode | Should -Be 1
-            $result.Output | Should -Match 'Format-PowerShell\.ps1 failed: boom'
+            $result.Output | Should -Be "Format and lint could not run, so some files were not checked. Tell the user, and ask before installing tools or changing config.`nnot checked: Format-PowerShell.ps1 failed: boom"
         }
     }
 

@@ -132,7 +132,7 @@ Describe 'Format-Markdown' {
         }
 
         It 'falls back to npx with the pinned version when markdownlint-cli2 is not on PATH' {
-            $npx = New-Stub -Name 'npx'
+            $npx = New-Stub -Name 'npx', 'prettier'
 
             $result = Invoke-FormatMarkdown -Path 'a.md' -PathValue $npx
 
@@ -219,28 +219,33 @@ Describe 'Format-Markdown' {
             $result.Output | Should -Match 'something unexpected'
         }
 
-        It 'skips lint silently when npm itself fails' {
+        It 'fails when npm itself fails' {
             $result = Invoke-FormatMarkdown -Path 'a.md' -PathValue $script:StubPath -Environment @{
                 STUB_FINDINGS = 'npm error code E404'
                 STUB_RC       = '1'
             }
 
-            $result.ExitCode | Should -Be 0
-            $result.Output | Should -BeNullOrEmpty
+            $result.ExitCode | Should -Be 1
+            $result.Output | Should -Match 'not checked: npm or npx failed before markdownlint-cli2 ran'
+            $result.Output | Should -Match 'not checked: npm error code E404'
         }
 
-        It 'fails under Strict when npm itself fails' {
-            $result = Invoke-FormatMarkdown -Path 'a.md' -PathValue $script:StubPath -Extra '-Strict' -Environment @{
-                STUB_FINDINGS = 'npm error code E404'
-                STUB_RC       = '1'
-            }
+        It 'fails when npm fails only in the check run' {
+            $dir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $dir | Out-Null
+            $stub = Join-Path $dir 'markdownlint-cli2'
+            Set-Content $stub "#!/bin/sh`nfor a in `"`$@`"; do [ `"`$a`" = --fix ] && exit 0; done`necho 'npm error code E404'`nexit 1"
+            chmod +x $stub
+            $path = $dir + [IO.Path]::PathSeparator + $script:StubPath
+
+            $result = Invoke-FormatMarkdown -Path 'a.md' -PathValue $path
 
             $result.ExitCode | Should -Be 1
-            $result.Output | Should -Match 'npm or npx failed before markdownlint-cli2 ran'
-            $result.Output | Should -Match 'npm error code E404'
+            $result.Output | Should -Match 'not checked: npm or npx failed before markdownlint-cli2 ran'
+            $result.Output | Should -Match 'not checked: npm error code E404'
         }
 
-        It 'fails under Strict when npm fails only in the fix run' {
+        It 'fails when npm fails only in the fix run' {
             $dir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
             New-Item -ItemType Directory -Path $dir | Out-Null
             $stub = Join-Path $dir 'markdownlint-cli2'
@@ -248,16 +253,14 @@ Describe 'Format-Markdown' {
             chmod +x $stub
             $path = $dir + [IO.Path]::PathSeparator + $script:StubPath
 
-            $result = Invoke-FormatMarkdown -Path 'a.md' -PathValue $path -Extra '-Strict'
-            $plain = Invoke-FormatMarkdown -Path 'a.md' -PathValue $path
+            $result = Invoke-FormatMarkdown -Path 'a.md' -PathValue $path
 
             $result.ExitCode | Should -Be 1
-            $result.Output | Should -Match 'npm or npx failed before markdownlint-cli2 ran'
-            $plain.ExitCode | Should -Be 0
-            $plain.Output | Should -BeNullOrEmpty
+            $result.Output | Should -Match 'not checked: npm or npx failed before markdownlint-cli2 ran'
+            $result.Output | Should -Match 'not checked: npm error code E404'
         }
 
-        It 'fails under Strict when markdownlint-cli2 cannot start, and skips silently otherwise' {
+        It 'fails when markdownlint-cli2 cannot start' {
             $dir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
             New-Item -ItemType Directory -Path $dir | Out-Null
             $stub = Join-Path $dir 'markdownlint-cli2'
@@ -265,36 +268,30 @@ Describe 'Format-Markdown' {
             chmod +x $stub
             $path = $dir + [IO.Path]::PathSeparator + $script:StubPath
 
-            $strict = Invoke-FormatMarkdown -Path 'a.md' -PathValue $path -Extra '-Strict'
-            $plain = Invoke-FormatMarkdown -Path 'a.md' -PathValue $path
+            $result = Invoke-FormatMarkdown -Path 'a.md' -PathValue $path
 
-            $strict.ExitCode | Should -Be 1
-            $strict.Output | Should -Match 'markdownlint-cli2 could not start'
-            $plain.ExitCode | Should -Be 0
-            $plain.Output | Should -BeNullOrEmpty
+            $result.ExitCode | Should -Be 1
+            $result.Output | Should -Match 'not checked: markdownlint-cli2 could not start'
         }
 
-        It 'fails under Strict with a message when the shared budget runs out' {
-            $result = Invoke-FormatMarkdown -Path 'a.md' -PathValue $script:StubPath -Extra '-Strict -LintTimeoutSeconds 1' -Environment @{
+        It 'fails with a prefixed message and kills the process when the shared budget runs out' {
+            $started = Get-Date
+
+            $result = Invoke-FormatMarkdown -Path 'a.md' -PathValue $script:StubPath -Extra '-LintTimeoutSeconds 5' -Environment @{
                 STUB_SLEEP = '30'
                 STUB_RC    = '1'
             }
 
             $result.ExitCode | Should -Be 1
-            $result.Output | Should -Match 'markdownlint-cli2 timed out after 1 s'
+            $result.Output | Should -Match 'not checked: markdownlint-cli2 (timed out after 5 s|skipped: lint timeout budget used up)'
+            ((Get-Date) - $started).TotalSeconds | Should -BeLessThan 25
         }
 
-        It 'skips lint silently and kills the process when the shared budget runs out' {
-            $started = Get-Date
+        It 'reports the used-up budget when the timeout is 0' {
+            $result = Invoke-FormatMarkdown -Path 'a.md' -PathValue $script:StubPath -Extra '-LintTimeoutSeconds 0'
 
-            $result = Invoke-FormatMarkdown -Path 'a.md' -PathValue $script:StubPath -Extra '-LintTimeoutSeconds 1' -Environment @{
-                STUB_SLEEP = '30'
-                STUB_RC    = '1'
-            }
-
-            $result.ExitCode | Should -Be 0
-            $result.Output | Should -BeNullOrEmpty
-            ((Get-Date) - $started).TotalSeconds | Should -BeLessThan 25
+            $result.ExitCode | Should -Be 1
+            $result.Output | Should -Match 'not checked: markdownlint-cli2 skipped: lint timeout budget used up'
         }
     }
 
@@ -310,58 +307,39 @@ Describe 'Format-Markdown' {
     }
 
     Context 'tools missing' -Skip:$IsWindows {
-        It 'exits 0 with neither prettier nor markdownlint available' {
-            $empty = Join-Path $TestDrive 'empty-bin'
+        It 'fails naming both missing tools' {
+            $empty = Join-Path $TestDrive 'empty-bin-strict'
             New-Item -ItemType Directory -Path $empty -Force | Out-Null
             $file = Join-Path $script:Repo 'm.md'
             Set-Content $file "# Title`n* item`n" -NoNewline
 
             $result = Invoke-FormatMarkdown -Path 'm.md' -PathValue $empty
 
-            $result.ExitCode | Should -Be 0
-            $result.Output | Should -BeNullOrEmpty
+            $result.ExitCode | Should -Be 1
+            $result.Output | Should -Match 'not checked: prettier not found on PATH'
+            $result.Output | Should -Match 'not checked: markdownlint-cli2 not found on PATH and npx not found'
             Get-Content $file -Raw | Should -Be "# Title`n* item`n"
         }
 
-        It 'fails under Strict naming both missing tools' {
-            $empty = Join-Path $TestDrive 'empty-bin-strict'
-            New-Item -ItemType Directory -Path $empty -Force | Out-Null
-
-            $result = Invoke-FormatMarkdown -Path 'a.md' -PathValue $empty -Extra '-Strict'
-
-            $result.ExitCode | Should -Be 1
-            $result.Output | Should -Match 'prettier not found on PATH'
-            $result.Output | Should -Match 'markdownlint-cli2 not found on PATH and npx not found'
-        }
-
-        It 'reports a missing prettier once under Strict for several files' {
+        It 'reports a missing prettier once for several files' {
             $empty = Join-Path $TestDrive 'empty-bin-many'
             New-Item -ItemType Directory -Path $empty -Force | Out-Null
             Set-Content (Join-Path $script:Repo 'b.md') "# B`n" -NoNewline
 
-            $result = Invoke-FormatMarkdown -Path 'a.md', 'b.md' -PathValue $empty -Extra '-Strict'
+            $result = Invoke-FormatMarkdown -Path 'a.md', 'b.md' -PathValue $empty
 
             $result.ExitCode | Should -Be 1
             ([regex]::Matches($result.Output, 'prettier not found on PATH')).Count | Should -Be 1
         }
 
-        It 'fails under Strict when only markdownlint-cli2 and npx are missing' {
-            $only = New-Stub -Name 'prettier'
-
-            $result = Invoke-FormatMarkdown -Path 'a.md' -PathValue $only -Extra '-Strict'
-
-            $result.ExitCode | Should -Be 1
-            $result.Output | Should -Match 'markdownlint-cli2 not found on PATH and npx not found'
-            $result.Output | Should -Not -Match 'prettier not found'
-        }
-
-        It 'exits 0 without Strict when only markdownlint-cli2 and npx are missing' {
+        It 'fails when only markdownlint-cli2 and npx are missing' {
             $only = New-Stub -Name 'prettier'
 
             $result = Invoke-FormatMarkdown -Path 'a.md' -PathValue $only
 
-            $result.ExitCode | Should -Be 0
-            $result.Output | Should -BeNullOrEmpty
+            $result.ExitCode | Should -Be 1
+            $result.Output | Should -Match 'not checked: markdownlint-cli2 not found on PATH and npx not found'
+            $result.Output | Should -Not -Match 'prettier not found'
         }
     }
 

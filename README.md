@@ -30,11 +30,12 @@ claude plugin validate ./tdd-workflow             # plugin manifest
 ./Update-ClaudePlugin.ps1 planning Minor          # bump, PR, merge, refresh, update
 ```
 
-Formatting and linting run automatically as Claude Code hooks
-(`.claude/settings.json`, scripts in `Scripts/claude-hooks/`).
+Formatting and linting are done by Claude Code hooks on every write
+(`.claude/settings.json`, scripts in `Scripts/claude-hooks/`), and
+`Scripts/Test-RepositoryFormat.ps1` checks the whole tree.
 
-`CLAUDE.md` carries the conventions: formatting, tests beside scripts, and why
-the version bump is the promote gesture.
+`CLAUDE.md` carries the conventions: tests beside scripts, and why the version
+bump is the promote gesture.
 
 ## License
 
