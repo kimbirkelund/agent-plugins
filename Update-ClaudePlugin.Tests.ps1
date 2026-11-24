@@ -111,12 +111,46 @@ exit /b $ClaudeExitCode
             chmod +x $shim;
         }
 
-        # The gh stub logs its arguments and prints a pull request URL, like `gh pr create`.
+        # The gh stub logs its arguments. `pr create` prints a pull request URL; `pr view` serves
+        # the next numbered roll-up from gh-responses (the last one repeats); `pr merge` moves
+        # main in the bare remote to the ship branch's commit, as a merge would.
         $ghLog = Join-Path $base 'gh-args.txt';
+        $ghResponses = Join-Path $base 'gh-responses';
+        New-Item -ItemType Directory -Path $ghResponses -Force | Out-Null;
+        Set-Content -LiteralPath (Join-Path $ghResponses 'view-1.json') -Value '{"state":"OPEN","statusCheckRollup":[{"__typename":"CheckRun","name":"ci-success","status":"COMPLETED","conclusion":"SUCCESS"}]}';
         if (-not $NoGh)
         {
             $shim = Join-Path $binDir 'gh';
-            "#!/bin/sh`nprintf '%s\n' `"`$*`" >> '$ghLog'`necho 'https://example.test/pull/1'`nexit 0`n" | Set-Content -LiteralPath $shim -NoNewline;
+            $remotePath = Join-Path $base 'remote.git';
+            $body = @'
+#!/bin/sh
+printf '%s\n' "$*" >> 'LOG'
+case "$1 $2" in
+"pr create")
+    echo 'https://example.test/pull/1'
+    ;;
+"pr view")
+    countFile='RESP/count'
+    n=$(( $(cat "$countFile" 2>/dev/null || echo 0) + 1 ))
+    echo $n > "$countFile"
+    f="RESP/view-$n.json"
+    [ -f "$f" ] || f=$(ls RESP/view-*.json | sort | tail -1)
+    cat "$f"
+    ;;
+"pr merge")
+    b=$(git -C 'REMOTE' for-each-ref --format='%(refname:short)' 'refs/heads/ship/*' | head -1)
+    if [ -f 'RESP/merge-diverge' ]; then
+        export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com
+        git -C 'REMOTE' update-ref refs/heads/main "$(git -C 'REMOTE' commit-tree -m unrelated "$(git -C 'REMOTE' rev-parse 'refs/heads/main^{tree}')")"
+    elif [ ! -f 'RESP/merge-noop' ]; then
+        git -C 'REMOTE' update-ref refs/heads/main "$(git -C 'REMOTE' rev-parse "refs/heads/$b")"
+    fi
+    exit $(cat 'RESP/merge-exit' 2>/dev/null || echo 0)
+    ;;
+esac
+exit 0
+'@
+            $body.Replace('LOG', $ghLog).Replace('RESP', $ghResponses).Replace('REMOTE', $remotePath) | Set-Content -LiteralPath $shim -NoNewline;
             chmod +x $shim;
         }
 
@@ -144,6 +178,7 @@ exit /b $ClaudeExitCode
             ManifestPath    = Join-Path $pluginDir '.claude-plugin/plugin.json'
             ClaudeLog       = $claudeLog
             GhLog           = $ghLog
+            GhResponses     = $ghResponses
         }
     }
 
@@ -161,6 +196,22 @@ exit /b $ClaudeExitCode
     function Get-RemoteHead([string]$Remote, [string]$Branch = 'main')
     {
         return (git -C $Remote rev-parse $Branch);
+    }
+
+    # Replaces the roll-ups the gh stub serves to successive `pr view` calls.
+    function Set-GhViews($Fixture, [string[]]$Json)
+    {
+        Remove-Item -Path (Join-Path $Fixture.GhResponses 'view-*.json');
+        for ($i = 0; $i -lt $Json.Count; $i++)
+        {
+            Set-Content -LiteralPath (Join-Path $Fixture.GhResponses "view-$($i + 1).json") -Value $Json[$i];
+        }
+    }
+
+    function Get-GhCalls([string]$LogPath)
+    {
+        if (-not (Test-Path -LiteralPath $LogPath)) { return @() }
+        return @(Get-Content -LiteralPath $LogPath | Where-Object { $_.Trim() });
     }
 
     function Test-RemoteBranch([string]$Remote, [string]$Branch)
@@ -493,8 +544,9 @@ Describe 'Update-ClaudePlugin' {
 
         It 'puts the bump commit on the ship branch of the remote and leaves main alone' {
             $f = New-Fixture -Version '0.1.0';
+            Set-GhViews $f @('{"state":"OPEN","statusCheckRollup":[{"__typename":"CheckRun","name":"ci","status":"COMPLETED","conclusion":"FAILURE"}]}');
             $before = Get-RemoteHead $f.Remote;
-            & $script:ScriptPath -Name planning -MarketplaceRoot $f.MarketplaceRoot | Out-Null;
+            { & $script:ScriptPath -Name planning -MarketplaceRoot $f.MarketplaceRoot } | Should -Throw;
 
             git -C $f.Root branch --show-current | Should -Be 'ship/planning-0.1.1';
             git -C $f.Remote log -1 --pretty=%s 'ship/planning-0.1.1' | Should -Be 'bump planning plugin to 0.1.1';
@@ -507,8 +559,7 @@ Describe 'Update-ClaudePlugin' {
             $f = New-Fixture -Version '0.1.0';
             & $script:ScriptPath -Name planning -MarketplaceRoot $f.MarketplaceRoot | Out-Null;
 
-            $calls = @(Get-Content -LiteralPath $f.GhLog);
-            $calls.Count | Should -Be 1;
+            $calls = @(Get-GhCalls $f.GhLog);
             $calls[0] | Should -BeLike 'pr create --base main --head ship/planning-0.1.1 --title bump planning plugin to 0.1.1 --body *0.1.0*0.1.1*';
         }
 
@@ -520,6 +571,7 @@ Describe 'Update-ClaudePlugin' {
             git -C $f.Root log -1 --pretty=%s | Should -Be 'bump planning plugin to 0.1.1';
             Test-RemoteBranch $f.Remote 'ship/planning-0.1.1' | Should -BeFalse;
             Test-Path -LiteralPath $f.GhLog | Should -BeFalse;
+            Get-ClaudeCalls $f.ClaudeLog | Should -BeNullOrEmpty;
             $result.PullRequestUrl | Should -BeNullOrEmpty;
         }
 
@@ -541,6 +593,186 @@ Describe 'Update-ClaudePlugin' {
             git -C $f.Root rev-parse HEAD | Should -Be $before;
             Test-RemoteBranch $f.Remote 'ship/planning-0.1.1' | Should -BeFalse;
             Test-Path -LiteralPath $f.GhLog | Should -BeFalse;
+        }
+    }
+
+    Context 'waiting, merging and returning to main' {
+
+        BeforeAll {
+            $script:Failed = '{"state":"OPEN","statusCheckRollup":[{"__typename":"CheckRun","name":"format","status":"COMPLETED","conclusion":"SUCCESS"},{"__typename":"CheckRun","name":"test","status":"COMPLETED","conclusion":"FAILURE"}]}';
+            $script:Cancelled = '{"state":"OPEN","statusCheckRollup":[{"__typename":"CheckRun","name":"test","status":"COMPLETED","conclusion":"CANCELLED"}]}';
+            $script:Empty = '{"state":"OPEN","statusCheckRollup":[]}';
+            $script:Pending = '{"state":"OPEN","statusCheckRollup":[{"__typename":"CheckRun","name":"test","status":"IN_PROGRESS","conclusion":""}]}';
+        }
+
+        It 'merges after the checks passed, then updates from the merged commit' {
+            $f = New-Fixture -Version '0.1.0';
+            $result = & $script:ScriptPath -Name planning -MarketplaceRoot $f.MarketplaceRoot;
+
+            @(Get-GhCalls $f.GhLog) | Should -Contain 'pr merge https://example.test/pull/1 --merge --delete-branch';
+            Get-ClaudeCalls $f.ClaudeLog | Should -Be @('plugin marketplace update agent-plugins', 'plugin update planning@agent-plugins');
+            $result.Merged | Should -BeTrue;
+            $result.Updated | Should -BeTrue;
+        }
+
+        It 'merges when the roll-up is empty at first and then passes, polling in between' {
+            $f = New-Fixture -Version '0.1.0';
+            $passed = Get-Content -Raw -LiteralPath (Join-Path $f.GhResponses 'view-1.json');
+            Set-GhViews $f @($script:Empty, $script:Pending, $passed);
+            & $script:ScriptPath -Name planning -MarketplaceRoot $f.MarketplaceRoot -PollIntervalSeconds 0.05 | Out-Null;
+
+            @(Get-GhCalls $f.GhLog | Where-Object { $_ -like 'pr view *' }).Count | Should -Be 3;
+            @(Get-GhCalls $f.GhLog) | Should -Contain 'pr merge https://example.test/pull/1 --merge --delete-branch';
+        }
+
+        It 'throws on a failed check, naming it and the pull request, without merging or updating' {
+            $f = New-Fixture -Version '0.1.0';
+            Set-GhViews $f @($script:Failed);
+
+            { & $script:ScriptPath -Name planning -MarketplaceRoot $f.MarketplaceRoot } |
+                Should -Throw -ExpectedMessage "*'test'*FAILURE*https://example.test/pull/1*";
+
+            @(Get-GhCalls $f.GhLog | Where-Object { $_ -like 'pr merge*' }) | Should -BeNullOrEmpty;
+            Get-ClaudeCalls $f.ClaudeLog | Should -BeNullOrEmpty;
+        }
+
+        It 'names the branch the checkout is on and how to leave it when it throws' {
+            $f = New-Fixture -Version '0.1.0';
+            Set-GhViews $f @($script:Failed);
+
+            { & $script:ScriptPath -Name planning -MarketplaceRoot $f.MarketplaceRoot } |
+                Should -Throw -ExpectedMessage "*checkout is still on 'ship/planning-0.1.1'*git switch main*";
+            git -C $f.Root branch --show-current | Should -Be 'ship/planning-0.1.1';
+        }
+
+        It 'throws on a cancelled check without merging or updating' {
+            $f = New-Fixture -Version '0.1.0';
+            Set-GhViews $f @($script:Cancelled);
+
+            { & $script:ScriptPath -Name planning -MarketplaceRoot $f.MarketplaceRoot } |
+                Should -Throw -ExpectedMessage "*'test'*CANCELLED*";
+
+            @(Get-GhCalls $f.GhLog | Where-Object { $_ -like 'pr merge*' }) | Should -BeNullOrEmpty;
+            Get-ClaudeCalls $f.ClaudeLog | Should -BeNullOrEmpty;
+        }
+
+        It 'throws on timeout without merging or updating' {
+            $f = New-Fixture -Version '0.1.0';
+            Set-GhViews $f @($script:Pending);
+
+            { & $script:ScriptPath -Name planning -MarketplaceRoot $f.MarketplaceRoot -TimeoutSeconds 1 -PollIntervalSeconds 0.2 } |
+                Should -Throw -ExpectedMessage '*Timed out after 1 seconds*https://example.test/pull/1*';
+
+            @(Get-GhCalls $f.GhLog | Where-Object { $_ -like 'pr merge*' }) | Should -BeNullOrEmpty;
+            Get-ClaudeCalls $f.ClaudeLog | Should -BeNullOrEmpty;
+        }
+
+        It 'leaves the checkout on main at the merged commit with the ship branch gone' {
+            $f = New-Fixture -Version '0.1.0';
+            & $script:ScriptPath -Name planning -MarketplaceRoot $f.MarketplaceRoot | Out-Null;
+
+            git -C $f.Root branch --show-current | Should -Be 'main';
+            git -C $f.Root rev-parse HEAD | Should -Be (Get-RemoteHead $f.Remote);
+            git -C $f.Root log -1 --pretty=%s | Should -Be 'bump planning plugin to 0.1.1';
+            git -C $f.Root branch --list 'ship/*' | Should -BeNullOrEmpty;
+        }
+
+        It 'merges but makes no claude call with -SkipUpdate' {
+            $f = New-Fixture -Version '0.1.0';
+            $result = & $script:ScriptPath -Name planning -SkipUpdate -MarketplaceRoot $f.MarketplaceRoot;
+
+            @(Get-GhCalls $f.GhLog) | Should -Contain 'pr merge https://example.test/pull/1 --merge --delete-branch';
+            Get-ClaudeCalls $f.ClaudeLog | Should -BeNullOrEmpty;
+            $result.Merged | Should -BeTrue;
+        }
+
+        It 'treats a failing gh pr merge as merged when the pull request is MERGED' {
+            $f = New-Fixture -Version '0.1.0';
+            $passed = Get-Content -Raw -LiteralPath (Join-Path $f.GhResponses 'view-1.json');
+            Set-GhViews $f @($passed, '{"state":"MERGED","statusCheckRollup":[]}');
+            Set-Content -LiteralPath (Join-Path $f.GhResponses 'merge-exit') -Value '1';
+            $result = & $script:ScriptPath -Name planning -MarketplaceRoot $f.MarketplaceRoot;
+
+            $result.Merged | Should -BeTrue;
+            git -C $f.Root branch --show-current | Should -Be 'main';
+            git -C $f.Root branch --list 'ship/*' | Should -BeNullOrEmpty;
+            Get-ClaudeCalls $f.ClaudeLog | Should -Be @('plugin marketplace update agent-plugins', 'plugin update planning@agent-plugins');
+        }
+
+        It 'throws and makes no claude call when gh pr merge fails and the pull request is not merged' {
+            $f = New-Fixture -Version '0.1.0';
+            Set-Content -LiteralPath (Join-Path $f.GhResponses 'merge-exit') -Value '1';
+            Set-Content -LiteralPath (Join-Path $f.GhResponses 'merge-noop') -Value '';
+
+            { & $script:ScriptPath -Name planning -MarketplaceRoot $f.MarketplaceRoot } |
+                Should -Throw -ExpectedMessage '*not merged*by hand*';
+
+            Get-ClaudeCalls $f.ClaudeLog | Should -BeNullOrEmpty;
+        }
+
+        It 'carries the merged note when a step after the merge throws' {
+            $f = New-Fixture -Version '0.1.0';
+            Set-Content -LiteralPath (Join-Path $f.GhResponses 'merge-diverge') -Value '';
+
+            { & $script:ScriptPath -Name planning -MarketplaceRoot $f.MarketplaceRoot } |
+                Should -Throw -ExpectedMessage '*up to date with origin/main failed*pull request is merged; finish with*';
+
+            Get-ClaudeCalls $f.ClaudeLog | Should -BeNullOrEmpty;
+        }
+
+        It 'throws when the pull request is not open' {
+            $f = New-Fixture -Version '0.1.0';
+            Set-GhViews $f @('{"state":"CLOSED","statusCheckRollup":[]}');
+
+            { & $script:ScriptPath -Name planning -MarketplaceRoot $f.MarketplaceRoot } |
+                Should -Throw -ExpectedMessage '*is CLOSED*';
+
+            @(Get-GhCalls $f.GhLog | Where-Object { $_ -like 'pr merge*' }) | Should -BeNullOrEmpty;
+        }
+
+        It 'throws on a failed status context' {
+            $f = New-Fixture -Version '0.1.0';
+            Set-GhViews $f @('{"state":"OPEN","statusCheckRollup":[{"__typename":"StatusContext","context":"ci/legacy","state":"FAILURE"}]}');
+
+            { & $script:ScriptPath -Name planning -MarketplaceRoot $f.MarketplaceRoot } |
+                Should -Throw -ExpectedMessage "*'ci/legacy'*FAILURE*";
+        }
+
+        It 'waits on a pending status context and merges once it succeeds' {
+            $f = New-Fixture -Version '0.1.0';
+            Set-GhViews $f @(
+                '{"state":"OPEN","statusCheckRollup":[{"__typename":"StatusContext","context":"ci/legacy","state":"PENDING"}]}',
+                '{"state":"OPEN","statusCheckRollup":[{"__typename":"StatusContext","context":"ci/legacy","state":"SUCCESS"}]}');
+            & $script:ScriptPath -Name planning -MarketplaceRoot $f.MarketplaceRoot -PollIntervalSeconds 0.05 | Out-Null;
+
+            @(Get-GhCalls $f.GhLog) | Should -Contain 'pr merge https://example.test/pull/1 --merge --delete-branch';
+        }
+
+        It 'still updates with -SkipCommit on main, having nothing to merge' {
+            $f = New-Fixture -Version '0.1.0';
+            & $script:ScriptPath -Name planning -SkipCommit -MarketplaceRoot $f.MarketplaceRoot | Out-Null;
+
+            Get-ClaudeCalls $f.ClaudeLog | Should -Be @('plugin marketplace update agent-plugins', 'plugin update planning@agent-plugins');
+            Test-Path -LiteralPath $f.GhLog | Should -BeFalse;
+        }
+
+        It 'lists the merge, switch-back and update steps with -WhatIf without doing them' {
+            $f = New-Fixture -Version '0.1.0';
+            # The What if lines go to the host, so they are read from a child process's output.
+            $all = pwsh -NoProfile -File $script:ScriptPath -Name planning -MarketplaceRoot $f.MarketplaceRoot -WhatIf 2>&1 | Out-String;
+
+            $all | Should -BeLike '*gh pr merge*';
+            $all | Should -BeLike '*git switch main*';
+            $all | Should -BeLike '*claude plugin update*';
+            Get-ClaudeCalls $f.ClaudeLog | Should -BeNullOrEmpty;
+        }
+
+        It 'calls neither gh pr merge nor claude with -WhatIf' {
+            $f = New-Fixture -Version '0.1.0';
+            & $script:ScriptPath -Name planning -MarketplaceRoot $f.MarketplaceRoot -WhatIf | Out-Null;
+
+            Test-Path -LiteralPath $f.GhLog | Should -BeFalse;
+            Get-ClaudeCalls $f.ClaudeLog | Should -BeNullOrEmpty;
         }
     }
 

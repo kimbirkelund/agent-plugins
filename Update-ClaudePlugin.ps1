@@ -93,7 +93,14 @@ param(
 
     [switch]$SkipPush,
 
-    [switch]$SkipUpdate
+    [switch]$SkipUpdate,
+
+    # How long to wait for the pull request's checks before giving up.
+    [int]$TimeoutSeconds = 900,
+
+    # Seconds between polls of the pull request's checks; a parameter only so tests can shorten it.
+    [Parameter(DontShow)]
+    [double]$PollIntervalSeconds = 10
 )
 
 $PSCmdlet.MyInvocation.BoundParameters.Keys | ForEach-Object { Write-Verbose "$($PSCmdlet.MyInvocation.MyCommand)-$($_): $($PSCmdlet.MyInvocation.BoundParameters[$_])" }
@@ -266,86 +273,257 @@ if ($PSCmdlet.ShouldProcess($pluginManifestPath, "set version to $newVersion"))
 }
 
 $commitSha = $null;
-if (-not $SkipCommit)
-{
-    $commitMessage = "bump $Name plugin to $newVersion";
+$pushed = $false;
+$merged = $false;
+$onShipBranch = $false;
 
-    if ($mode -eq 'PullRequest' -and $PSCmdlet.ShouldProcess($repoRoot, "create branch $shipBranch"))
+try
+{
+    if (-not $SkipCommit)
     {
-        git -C $repoRoot switch --quiet -c $shipBranch;
-        if ($LASTEXITCODE -ne 0)
+        $commitMessage = "bump $Name plugin to $newVersion";
+
+        if ($mode -eq 'PullRequest' -and $PSCmdlet.ShouldProcess($repoRoot, "create branch $shipBranch"))
         {
-            throw "git switch -c $shipBranch failed.";
+            git -C $repoRoot switch --quiet -c $shipBranch;
+            if ($LASTEXITCODE -ne 0)
+            {
+                throw "git switch -c $shipBranch failed.";
+            }
+
+            $onShipBranch = $true;
+        }
+
+        if ($PSCmdlet.ShouldProcess($relativeManifestPath, "commit `"$commitMessage`""))
+        {
+            # Stage and commit this one path only; a pathspec commit ignores whatever else is
+            # in the index, so unrelated staged work is neither committed nor disturbed.
+            git -C $repoRoot add -- $relativeManifestPath;
+            if ($LASTEXITCODE -ne 0)
+            {
+                throw "git add failed for '$relativeManifestPath'.";
+            }
+
+            git -C $repoRoot commit --quiet -m $commitMessage -- $relativeManifestPath;
+            if ($LASTEXITCODE -ne 0)
+            {
+                throw "git commit failed for '$relativeManifestPath'.";
+            }
+
+            $commitSha = git -C $repoRoot rev-parse HEAD;
         }
     }
 
-    if ($PSCmdlet.ShouldProcess($relativeManifestPath, "commit `"$commitMessage`""))
+    if (-not $SkipCommit -and -not $SkipPush)
     {
-        # Stage and commit this one path only; a pathspec commit ignores whatever else is
-        # in the index, so unrelated staged work is neither committed nor disturbed.
-        git -C $repoRoot add -- $relativeManifestPath;
-        if ($LASTEXITCODE -ne 0)
+        $pushBranch = if ($mode -eq 'PullRequest') { $shipBranch } else { $branch };
+
+        if ($PSCmdlet.ShouldProcess($repoRoot, "git push $pushBranch"))
         {
-            throw "git add failed for '$relativeManifestPath'.";
+            git -C $repoRoot rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>$null | Out-Null;
+            $hasUpstream = $LASTEXITCODE -eq 0;
+
+            if ($mode -eq 'FeatureBranch' -and $hasUpstream)
+            {
+                git -C $repoRoot push | Out-Host;
+            }
+            else
+            {
+                git -C $repoRoot push -u origin $pushBranch | Out-Host;
+            }
+
+            if ($LASTEXITCODE -ne 0)
+            {
+                throw "git push failed with exit code $LASTEXITCODE. The bump is committed on '$pushBranch'; push it with 'git push -u origin $pushBranch' once the cause is fixed.";
+            }
+
+            $pushed = $true;
         }
 
-        git -C $repoRoot commit --quiet -m $commitMessage -- $relativeManifestPath;
-        if ($LASTEXITCODE -ne 0)
+        if ($mode -eq 'PullRequest' -and $pushed -and $PSCmdlet.ShouldProcess($shipBranch, 'gh pr create'))
         {
-            throw "git commit failed for '$relativeManifestPath'.";
+            Push-Location $repoRoot;
+            try
+            {
+                $created = gh pr create --base main --head $shipBranch --title $commitMessage --body "Bump the $Name plugin from $currentVersion to $newVersion.";
+                $createExit = $LASTEXITCODE;
+            }
+            finally
+            {
+                Pop-Location;
+            }
+
+            if ($createExit -ne 0)
+            {
+                throw "gh pr create failed with exit code $createExit. Branch '$shipBranch' is pushed; open the pull request by hand.";
+            }
+
+            $pullRequestUrl = @($created)[-1];
+        }
+    }
+
+    if ($mode -eq 'PullRequest' -and -not $SkipCommit -and -not $SkipPush)
+    {
+        if ($pullRequestUrl)
+        {
+            # Wait for every check to pass. No checks reported yet means keep waiting, not pass.
+            $failedStates = @('FAILURE', 'ERROR', 'TIMED_OUT', 'CANCELLED', 'ACTION_REQUIRED', 'STARTUP_FAILURE');
+            $clock = [System.Diagnostics.Stopwatch]::StartNew();
+            while ($true)
+            {
+                $viewLines = gh pr view $pullRequestUrl --json 'statusCheckRollup,state';
+                if ($LASTEXITCODE -ne 0)
+                {
+                    throw "gh pr view failed with exit code $LASTEXITCODE while waiting for the checks of $pullRequestUrl.";
+                }
+
+                $view = ($viewLines -join "`n") | ConvertFrom-Json;
+                if ("$($view.state)" -ne 'OPEN')
+                {
+                    throw "The pull request $pullRequestUrl is $($view.state), not open, so it was not merged.";
+                }
+
+                $checks = @($view.statusCheckRollup | Where-Object { $_ });
+                $pending = $false;
+                foreach ($check in $checks)
+                {
+                    if ($check.__typename -eq 'StatusContext')
+                    {
+                        $checkName = $check.context;
+                        $verdict = "$($check.state)".ToUpperInvariant();
+                        $isPending = $verdict -in 'PENDING', 'EXPECTED';
+                    }
+                    else
+                    {
+                        $checkName = $check.name;
+                        $verdict = "$($check.conclusion)".ToUpperInvariant();
+                        $isPending = "$($check.status)".ToUpperInvariant() -ne 'COMPLETED';
+                    }
+
+                    if ($isPending)
+                    {
+                        $pending = $true;
+                    }
+                    elseif ($verdict -in $failedStates)
+                    {
+                        throw "Check '$checkName' did not pass ($verdict) on $pullRequestUrl, so it was not merged.";
+                    }
+                }
+
+                if ($checks.Count -gt 0 -and -not $pending)
+                {
+                    break;
+                }
+
+                if ($clock.Elapsed.TotalSeconds -ge $TimeoutSeconds)
+                {
+                    throw "Timed out after $TimeoutSeconds seconds waiting for the checks of $pullRequestUrl, so it was not merged.";
+                }
+
+                Start-Sleep -Milliseconds ([int]($PollIntervalSeconds * 1000));
+            }
         }
 
-        $commitSha = git -C $repoRoot rev-parse HEAD;
+        if ($PSCmdlet.ShouldProcess($shipBranch, 'gh pr merge'))
+        {
+            Push-Location $repoRoot;
+            try
+            {
+                gh pr merge $pullRequestUrl --merge --delete-branch | Out-Host;
+                $mergeExit = $LASTEXITCODE;
+            }
+            finally
+            {
+                Pop-Location;
+            }
+
+            if ($mergeExit -eq 0)
+            {
+                $merged = $true;
+            }
+            else
+            {
+                # With the ship branch checked out, gh also does local work after the remote
+                # merge and can fail there; the pull request's own state is the truth.
+                $stateLines = gh pr view $pullRequestUrl --json state;
+                $stateExit = $LASTEXITCODE;
+                if ($stateExit -eq 0 -and (($stateLines -join "`n") | ConvertFrom-Json).state -eq 'MERGED')
+                {
+                    $merged = $true;
+                }
+                else
+                {
+                    throw "gh pr merge failed with exit code $mergeExit and the pull request is not merged. The checks passed; merge $pullRequestUrl by hand.";
+                }
+            }
+        }
+
+        # Under -WhatIf nothing merged, but the steps that would follow are still listed.
+        if ($merged -or $WhatIfPreference)
+        {
+            if ($PSCmdlet.ShouldProcess($repoRoot, 'git switch main'))
+            {
+                git -C $repoRoot switch --quiet main;
+                if ($LASTEXITCODE -ne 0)
+                {
+                    throw 'git switch main failed after the merge.';
+                }
+
+                $onShipBranch = $false;
+            }
+
+            if ($PSCmdlet.ShouldProcess($repoRoot, 'bring main up to date with origin/main'))
+            {
+                # fetch plus merge rather than `git pull`, which refuses to run with staged changes.
+                git -C $repoRoot fetch --quiet origin;
+                if ($LASTEXITCODE -eq 0)
+                {
+                    git -C $repoRoot merge --quiet --ff-only refs/remotes/origin/main;
+                }
+
+                if ($LASTEXITCODE -ne 0)
+                {
+                    throw 'Bringing main up to date with origin/main failed after the merge.';
+                }
+            }
+
+            # gh may already have removed the local branch together with the remote one.
+            git -C $repoRoot show-ref --verify --quiet "refs/heads/$shipBranch";
+            if (($LASTEXITCODE -eq 0 -or $WhatIfPreference) -and $PSCmdlet.ShouldProcess($shipBranch, 'delete the local ship branch'))
+            {
+                git -C $repoRoot branch --quiet -d $shipBranch;
+                if ($LASTEXITCODE -ne 0)
+                {
+                    throw "Could not delete the merged local branch '$shipBranch'; delete it by hand.";
+                }
+            }
+        }
     }
 }
-
-$pushed = $false;
-if (-not $SkipCommit -and -not $SkipPush)
+catch
 {
-    $pushBranch = if ($mode -eq 'PullRequest') { $shipBranch } else { $branch };
-
-    if ($PSCmdlet.ShouldProcess($repoRoot, "git push $pushBranch"))
+    $notes = @();
+    if ($onShipBranch)
     {
-        git -C $repoRoot rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>$null | Out-Null;
-        $hasUpstream = $LASTEXITCODE -eq 0;
-
-        if ($mode -eq 'FeatureBranch' -and $hasUpstream)
-        {
-            git -C $repoRoot push | Out-Host;
-        }
-        else
-        {
-            git -C $repoRoot push -u origin $pushBranch | Out-Host;
-        }
-
-        if ($LASTEXITCODE -ne 0)
-        {
-            throw "git push failed with exit code $LASTEXITCODE. The version bump is already committed on '$pushBranch'; push it and re-run with -SkipCommit to finish shipping.";
-        }
-
-        $pushed = $true;
+        $notes += "The checkout is still on '$shipBranch'; 'git switch main' returns to main.";
     }
 
-    if ($mode -eq 'PullRequest' -and $pushed -and $PSCmdlet.ShouldProcess($shipBranch, 'gh pr create'))
+    if ($pullRequestUrl)
     {
-        Push-Location $repoRoot;
-        try
-        {
-            $created = gh pr create --base main --head $shipBranch --title $commitMessage --body "Bump the $Name plugin from $currentVersion to $newVersion.";
-            $createExit = $LASTEXITCODE;
-        }
-        finally
-        {
-            Pop-Location;
-        }
-
-        if ($createExit -ne 0)
-        {
-            throw "gh pr create failed with exit code $createExit. Branch '$shipBranch' is pushed; open the pull request by hand.";
-        }
-
-        $pullRequestUrl = @($created)[-1];
+        $notes += "The pull request is $pullRequestUrl.";
     }
+
+    if ($merged)
+    {
+        $notes += 'The pull request is merged; finish with git switch main, git pull --ff-only (stash staged changes first), then claude plugin marketplace update and claude plugin update by hand.';
+    }
+
+    if ($notes)
+    {
+        throw "$($_.Exception.Message) $($notes -join ' ')";
+    }
+
+    throw;
 }
 
 if ($mode -eq 'FeatureBranch' -and -not $SkipCommit)
@@ -365,19 +543,21 @@ if ($mode -eq 'FeatureBranch' -and -not $SkipCommit)
 }
 
 $updated = $false;
-# Interim: on main this still runs right after the pull request is opened.
-if (-not $SkipUpdate -and $mode -ne 'FeatureBranch')
+# On main the installed copy updates only from the merged commit, or from what -SkipCommit left
+# in place; under -WhatIf the calls are listed.
+$wouldMerge = $WhatIfPreference -and $mode -eq 'PullRequest' -and -not $SkipCommit -and -not $SkipPush;
+if (-not $SkipUpdate -and $mode -ne 'FeatureBranch' -and ($merged -or $SkipCommit -or $wouldMerge))
 {
     $pluginId = "$Name@$Marketplace";
 
-    # The marketplace is a clone of the remote, so it has to fetch the pushed commit before
+    # The marketplace is a clone of the remote, so it has to fetch the merged commit before
     # the plugin update can find a new version to copy.
     if ($PSCmdlet.ShouldProcess($Marketplace, 'claude plugin marketplace update'))
     {
         claude plugin marketplace update $Marketplace | Out-Host;
         if ($LASTEXITCODE -ne 0)
         {
-            throw "'claude plugin marketplace update $Marketplace' failed with exit code $LASTEXITCODE. The version bump is already committed; re-run once the cause is fixed.";
+            throw "'claude plugin marketplace update $Marketplace' failed with exit code $LASTEXITCODE. The bump is merged on main; run that command by hand, then 'claude plugin update $pluginId'.";
         }
     }
 
@@ -388,7 +568,7 @@ if (-not $SkipUpdate -and $mode -ne 'FeatureBranch')
         claude plugin update $pluginId | Out-Host;
         if ($LASTEXITCODE -ne 0)
         {
-            throw "'claude plugin update $pluginId' failed with exit code $LASTEXITCODE. The version bump is already committed; re-run the update once the cause is fixed.";
+            throw "'claude plugin update $pluginId' failed with exit code $LASTEXITCODE. The bump is merged on main; run that command by hand once the cause is fixed.";
         }
 
         $updated = $true;
@@ -406,5 +586,6 @@ if (-not $SkipUpdate -and $mode -ne 'FeatureBranch')
     ManifestPath   = $pluginManifestPath
     Commit         = $commitSha
     Pushed         = $pushed
+    Merged         = $merged
     Updated        = $updated
 }
