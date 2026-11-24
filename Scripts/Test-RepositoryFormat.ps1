@@ -8,7 +8,8 @@
     files are hashed again. The formatters' findings are printed as they come, followed by one
     "path: not formatted" line per file whose hash changed. Formatting is done in place, so a
     failing run leaves the files rewritten. Exits 1 if any formatter exited non-zero or any
-    hash changed; otherwise 0.
+    hash changed; otherwise 0. A file git does not track is not checked, so run "git add -N" on a
+    new file first.
 .PARAMETER RepoRoot
     Repository root. Defaults to one level above this script.
 #>
