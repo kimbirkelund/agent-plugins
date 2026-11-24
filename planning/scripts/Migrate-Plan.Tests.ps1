@@ -6,6 +6,10 @@ BeforeDiscovery {
     {
         '' | Set-Content -LiteralPath $probe;
         (Get-Item -LiteralPath $probe).CreationTime = [datetime]'2001-02-03 04:05';
+        # Mirror the fixture: a later last write must not move the creation time. Without
+        # birth time support the setter writes the last write time, and the creation time is
+        # read back from it, so an immediate read-back alone would look settable.
+        (Get-Item -LiteralPath $probe).LastWriteTime = [datetime]'2001-02-05 06:07';
         $script:CanSetCreationTime = (Get-Item -LiteralPath $probe).CreationTime.Date -eq [datetime]'2001-02-03';
     }
     finally
