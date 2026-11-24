@@ -251,12 +251,25 @@ command after it with `cd` to `RepoRoot` from `Remove-PlanWorktree.ps1`.
 
 Report that the request was closed without a merge, and end.
 
-### 4. End every turn with the run summary
+### 4. End every turn of an active run with the run summary
 
-Every turn ends with the full run summary. It covers everything since this
-`/fnsh` started, not only the turn just taken, and is repeated in full each
-time. It is a numbered list with one item per thing handled: a pipeline failure,
-a single review comment, a conflict. Each item says:
+The run is active from the first start of the monitor until it reaches an end
+state. The end states are:
+
+- the user posts a prompt, which stops the monitor;
+- the script exits non-zero at startup;
+- a `no-request` event;
+- a `merged` event;
+- a `closed` event.
+
+A monitor timeout and restart does not end it, and neither does an item that
+failed its two fix rounds: the watch keeps going.
+
+Every turn while the run is active ends with the full run summary. It covers
+everything since this `/fnsh` started, not only the turn just taken, and is
+repeated in full each time. It is a numbered list with one item per thing
+handled: a pipeline failure, a single review comment, a conflict. Each item
+says:
 
 - what it was;
 - what was fixed and why, or why nothing was fixed (for a comment: its verdict
@@ -268,6 +281,11 @@ An item keeps its number for the whole run and new items take the next number,
 so the user can ask about "item 3". The list is session state: a new `/fnsh`
 starts again at 1. An event still in progress is an item too, marked as in
 progress.
+
+The turn that ends the run prints the summary once more, marked final. After
+that turn no turn prints a run summary, whatever it is about. The summaries
+earlier in the conversation are history, not a pattern to continue. Printing
+resumes only when a new `/fnsh` starts a new run.
 
 ## Committing and pushing
 
