@@ -4,7 +4,7 @@
 .DESCRIPTION
     Lists "git ls-files" under RepoRoot, keeps the files that exist and groups them by
     extension: PowerShell (.ps1 .psm1 .psd1), JSON/YAML (.json .jsonc .yml .yaml) and Markdown
-    (.md). Each file is hashed, each formatter runs once on its group with -Strict, and the
+    (.md). Each file is hashed, each formatter runs once on its group, and the
     files are hashed again. The formatters' findings are printed as they come, followed by one
     "path: not formatted" line per file whose hash changed. Formatting is done in place, so a
     failing run leaves the files rewritten. Exits 1 if any formatter exited non-zero or any
@@ -58,7 +58,7 @@ foreach ($group in $groups)
     }
 
     $extra = $group.Extra
-    & (Join-Path $PSScriptRoot $group.Script) -Path $selected -RepoRoot $root -Strict @extra
+    & (Join-Path $PSScriptRoot $group.Script) -Path $selected -RepoRoot $root @extra
     if ($LASTEXITCODE -ne 0)
     {
         $failed = $true

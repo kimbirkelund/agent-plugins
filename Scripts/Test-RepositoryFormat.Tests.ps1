@@ -138,6 +138,6 @@ Describe 'Test-RepositoryFormat' {
         $result = Invoke-RepositoryFormat -PathValue $bin
 
         $result.ExitCode | Should -Be 1
-        $result.Output | Should -Match 'prettier not found on PATH'
+        $result.Output | Should -Match 'not checked: prettier not found on PATH'
     }
 }

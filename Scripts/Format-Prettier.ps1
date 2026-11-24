@@ -4,22 +4,18 @@
 .DESCRIPTION
     Runs "prettier --write" on each file, with no prettier config added. A prettier failure is
     printed on stdout as "path: prettier failed" followed by its output, and the script exits
-    1; otherwise it exits 0. A missing prettier is silent success,
-    unless -Strict is given.
+    1; otherwise it exits 0. A missing prettier prints "not checked: prettier not found on
+    PATH" on stdout and the script exits 1.
 .PARAMETER Path
     Files to format. Relative paths resolve against the current directory. A missing file
     produces a warning and is skipped.
 .PARAMETER RepoRoot
     Repository root. Defaults to one level above this script.
-.PARAMETER Strict
-    Turns a missing prettier into a failure: one line naming the cause is printed on stdout
-    and the script exits 1.
 #>
 [CmdletBinding()]
 param(
     [string[]]$Path,
-    [string]$RepoRoot = (Join-Path $PSScriptRoot '..'),
-    [switch]$Strict
+    [string]$RepoRoot = (Join-Path $PSScriptRoot '..')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -31,13 +27,8 @@ $prettier = Get-Command prettier -CommandType Application -ErrorAction SilentlyC
 
 if (-not $prettier)
 {
-    if ($Strict)
-    {
-        'prettier not found on PATH'
-        exit 1
-    }
-
-    exit 0
+    'not checked: prettier not found on PATH'
+    exit 1
 }
 
 foreach ($item in $Path)
