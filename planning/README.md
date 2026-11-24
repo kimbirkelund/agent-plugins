@@ -94,12 +94,14 @@ failed checks on the same head sha gives no new event.
 
 Each fix gets at most two rounds. `/fnsh` never writes to the plan, never
 squashes the `fixup!` commits, and writes nothing to the forge except
-`git push`. Every turn ends with a numbered summary of everything handled since
-it started, with the pushed sha and time for each fix.
+`git push`. While the run is active, every turn ends with a numbered summary of
+everything handled since it started, with the pushed sha and time for each fix.
 
 `/fnsh` stops when the request is merged, closed or missing, or when you post a
 prompt: it stops the watch, answers, and names any event it received but did not
-finish. Run `/fnsh` again to resume the watch.
+finish. The summary stops with the run: the turn that ends it prints the summary
+once more, marked final, and later turns print none. Run `/fnsh` again to resume
+the watch, which starts a new run and a new summary.
 
 ## Issues go to the repository's own tracker
 
