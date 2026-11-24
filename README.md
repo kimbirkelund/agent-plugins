@@ -27,7 +27,7 @@ tree.
 claude plugin validate .                          # marketplace manifest
 claude plugin validate ./planning                 # plugin manifest
 claude plugin validate ./tdd-workflow             # plugin manifest
-./Update-ClaudePlugin.ps1 planning Minor          # bump, commit, push, refresh, update
+./Update-ClaudePlugin.ps1 planning Minor          # bump, PR, merge, refresh, update
 ```
 
 Formatting and linting run automatically as Claude Code hooks

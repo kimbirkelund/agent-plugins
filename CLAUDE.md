@@ -17,11 +17,22 @@ Shipping is one command:
 ./Update-ClaudePlugin.ps1 <plugin> [Major|Minor|Patch|x.y.z]
 ```
 
-It bumps the plugin's `version`, commits only that `plugin.json`, pushes, runs
+The branch you run it from picks the mode. On `main` it bumps the plugin's
+`version`, commits only that `plugin.json` on a new `ship/<plugin>-<version>`
+branch, pushes it, opens a pull request, waits for `ci-success` (and every other
+check) to pass, merges, returns the checkout to up-to-date `main`, runs
 `claude plugin marketplace update agent-plugins` so the marketplace clone
-fetches the new commit, and then `claude plugin update <plugin>@agent-plugins`.
-`-WhatIf` shows what it would do; `-SkipPush` and `-SkipUpdate` stop it part
-way.
+fetches the merged commit, and then
+`claude plugin update <plugin>@agent-plugins`. It never pushes to `main`. It
+needs `gh` and a `main` equal to `origin/main`.
+
+On a feature branch it commits the bump on that branch and pushes it, opens no
+pull request and makes no `claude` call, since the bump is not on `main` yet.
+Once the branch has merged, `./Update-ClaudePlugin.ps1 <plugin> -UpdateOnly`
+installs the version that is on `main`.
+
+`-WhatIf` shows what it would do; `-SkipPush` stops after the local commit and
+`-SkipUpdate` after the merge.
 
 **Bump `version` for every change you want to ship.** `claude plugin update`
 compares nothing else, so an unbumped change reports "already at the latest
@@ -139,8 +150,6 @@ in the workflow-level `env:` of `ci.yml`. Bump a version there, once.
 `.github/rulesets/main.json` is the record of the branch ruleset that requires
 `ci-success`. It is applied once, by hand, never by a script or an agent:
 `gh api --method POST repos/{owner}/{repo}/rulesets --input .github/rulesets/main.json`.
-Apply it only after shipping goes through a pull request; before that it blocks
-`Update-ClaudePlugin.ps1`'s direct push to `main`.
 
 ## Skills shared with `~/.claude/skills`
 

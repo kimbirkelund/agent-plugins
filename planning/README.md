@@ -282,5 +282,8 @@ spawned by `/impl`.
 
 Bump `version` in `.claude-plugin/plugin.json` — `claude plugin update` compares
 nothing else, so an unbumped edit leaves the installed snapshot stale with no
-error. `../Update-ClaudePlugin.ps1 planning` does the bump, the commit and the
-update in one step.
+error. `../Update-ClaudePlugin.ps1 planning` does the bump and the update in one
+step: on `main` it opens a pull request, waits for its checks, merges, then
+updates (it needs `gh` and an up-to-date `main`); on a feature branch it commits
+and pushes the bump there, and `../Update-ClaudePlugin.ps1 planning -UpdateOnly`
+installs it once that branch has merged.

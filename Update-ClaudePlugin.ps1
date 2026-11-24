@@ -1,34 +1,64 @@
 <#
 .SYNOPSIS
-    Ship a change to a plugin in this marketplace: bump its version, commit and push the
-    bump, refresh the marketplace, and pull the new version into the installed snapshot.
+    Ship a change to a plugin in this marketplace: bump its version, get the bump onto
+    main through a pull request, refresh the marketplace, and pull the new version into
+    the installed snapshot.
 
 .DESCRIPTION
-    This marketplace is registered from its git remote, not from this directory, so Claude
-    Code installs from a commit that has been pushed rather than from the work tree. That
-    is deliberate: a half-finished skill in the work tree is not live in every session, and
-    shipping is a gesture rather than a side effect of saving a file.
+    This marketplace is registered from its git remote's main branch, not from this
+    directory, so Claude Code installs from a commit that has been merged rather than from
+    the work tree. That is deliberate: a half-finished skill in the work tree is not live in
+    every session, and shipping is a gesture rather than a side effect of saving a file.
 
-    It also means four things have to happen in order, and all four are easy to forget:
+    Bumping `version` in the plugin's plugin.json is what makes `claude plugin update`
+    notice a change at all; it compares nothing else, so an unbumped change reports
+    "already at the latest version" and leaves the installed copy stale, with no error.
+    Only plugin.json is committed. Anything else in the work tree, staged or not, is left
+    exactly as it was, so an unfinished change stays unshipped even when the bump goes out.
 
-      1. bump `version` in the plugin's plugin.json — `claude plugin update` compares
-         nothing else, so an unbumped change reports "already at the latest version" and
-         leaves the installed copy stale, with no error;
-      2. commit it, and 3. push it, since the marketplace clone fetches from the remote;
-      4. `claude plugin marketplace update` so that clone sees the new commit, and only
-         then `claude plugin update`, which copies it into
+    The checked-out branch picks the mode. A detached HEAD is refused.
+
+    On main (pull request mode) the script never pushes to main:
+
+      1. it needs `gh` on PATH (unless -SkipPush or -SkipCommit is given) and main equal
+         to origin/main (it fetches first), and refuses if branch ship/<plugin>-<version>
+         already exists locally or on origin;
+      2. it bumps plugin.json and commits it on a new ship/<plugin>-<version> branch;
+      3. it pushes that branch and opens a pull request against main;
+      4. it polls the pull request every 10 seconds, up to -TimeoutSeconds, until every
+         check has passed (no checks reported yet means keep waiting); a failed or
+         cancelled check, a pull request that is no longer open, or a timeout throws
+         without merging, leaving the pull request as it is;
+      5. it merges with a merge commit and deletes the remote branch, switches back to
+         main, fast-forwards it to origin/main and deletes the local ship branch;
+      6. only then it runs `claude plugin marketplace update` so the marketplace clone sees
+         the merged commit, and `claude plugin update`, which copies the new version into
          ~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/.
 
-    Only the plugin's plugin.json is committed. Anything else in the work tree, staged or
-    not, is left exactly as it was — so an unfinished change stays unshipped even when the
-    bump goes out.
+    A failure after the ship branch was created leaves the checkout on it; the error says
+    so, and `git switch main` returns to main.
+
+    On any other branch (feature-branch mode) the bump is committed on that branch and the
+    branch is pushed (with -u origin <branch> when it has no upstream). No pull request is
+    opened, nothing is waited for or merged, `gh` is not needed, there is no fetch or
+    up-to-date guard, and neither `claude` command runs, because the bump is not on main
+    yet. The script ends by printing the command that installs it once the branch has
+    merged: ./Update-ClaudePlugin.ps1 <plugin> -UpdateOnly.
+
+    With -UpdateOnly the script installs what is already on main: it computes no version,
+    writes no manifest and makes no git or `gh` call, and runs only the marketplace
+    refresh and the plugin update. It works on any branch.
+
+    The result object carries Mode (PullRequest, FeatureBranch or UpdateOnly), Branch (the
+    ship branch, or the checked-out branch in feature-branch mode), PullRequestUrl, Pushed,
+    Merged and Updated beside the versions and the commit.
 
 .PARAMETER Name
     Plugin directory name under the marketplace root, e.g. 'planning'.
 
 .PARAMETER Version
     Either an explicit semantic version ('1.2.0') or the part to bump: Major, Minor or
-    Patch. Defaults to Patch.
+    Patch. Defaults to Patch. Cannot be combined with -UpdateOnly.
 
 .PARAMETER MarketplaceRoot
     Directory holding .claude-plugin/marketplace.json. Defaults to this script's directory.
@@ -41,28 +71,47 @@
     Permit a target version that is not greater than the current one.
 
 .PARAMETER SkipCommit
-    Write the new version but leave it uncommitted, and push nothing. The marketplace
-    refresh and the update still run, so they will find the previous commit — use it to
-    bump without shipping.
+    Write the new version and stop there: no guard, no branch, no commit, no push, no pull
+    request. On main the marketplace refresh and the plugin update still run, and find
+    whatever is already on main; in feature-branch mode nothing runs after the write.
 
 .PARAMETER SkipPush
-    Commit the bump but leave it unpushed. The marketplace fetches from the remote, so the
-    new version reaches the installed copy only once it is pushed.
+    Commit the bump and stop: on main on the local ship branch (the checkout stays on it),
+    in feature-branch mode on the checked-out branch. Nothing is pushed, no pull request
+    is opened, and no `claude` command runs.
 
 .PARAMETER SkipUpdate
-    Bump, commit and push, but do not refresh the marketplace or call
-    `claude plugin update`.
+    On main, do everything up to and including the merge but skip the marketplace refresh
+    and `claude plugin update`. In feature-branch mode it changes nothing, since those
+    commands never run there. Cannot be combined with -UpdateOnly.
+
+.PARAMETER UpdateOnly
+    Install the version that is already on main, without bumping anything. Refuses a
+    version argument and -SkipUpdate; -SkipCommit, -SkipPush, -AllowDowngrade and
+    -TimeoutSeconds are ignored with it.
+
+.PARAMETER TimeoutSeconds
+    How long to wait for the pull request's checks before giving up. Defaults to 900.
+    Only used on main.
 
 .EXAMPLE
     ./Update-ClaudePlugin.ps1 planning
-    Patch-bumps the planning plugin, commits and pushes the bump, refreshes the
-    marketplace, and updates the installed snapshot.
+    On main: patch-bumps the planning plugin on a ship branch, opens a pull request, waits
+    for its checks, merges it, returns to main, and updates the installed snapshot.
 
 .EXAMPLE
     ./Update-ClaudePlugin.ps1 planning Minor
+    On a feature branch: commits and pushes the bump there and prints the -UpdateOnly
+    command to run once the branch has merged.
+
+.EXAMPLE
+    ./Update-ClaudePlugin.ps1 planning -UpdateOnly
+    Refreshes the marketplace and updates the installed plugin from what is on main.
 
 .EXAMPLE
     ./Update-ClaudePlugin.ps1 planning 1.0.0 -WhatIf
+    Lists the actions, including the merge, the switch back to main and the `claude`
+    commands, without running any of them or changing anything.
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
@@ -93,7 +142,16 @@ param(
 
     [switch]$SkipPush,
 
-    [switch]$SkipUpdate
+    [switch]$SkipUpdate,
+
+    [switch]$UpdateOnly,
+
+    # How long to wait for the pull request's checks before giving up.
+    [int]$TimeoutSeconds = 900,
+
+    # Seconds between polls of the pull request's checks; a parameter only so tests can shorten it.
+    [Parameter(DontShow)]
+    [double]$PollIntervalSeconds = 10
 )
 
 $PSCmdlet.MyInvocation.BoundParameters.Keys | ForEach-Object { Write-Verbose "$($PSCmdlet.MyInvocation.MyCommand)-$($_): $($PSCmdlet.MyInvocation.BoundParameters[$_])" }
@@ -101,6 +159,16 @@ $PSCmdlet.MyInvocation.BoundParameters.Keys | ForEach-Object { Write-Verbose "$(
 $ErrorActionPreference = 'Stop';
 $PSNativeCommandUseErrorActionPreference = $false;
 Set-StrictMode -Version Latest;
+
+if ($UpdateOnly -and $PSBoundParameters.ContainsKey('Version'))
+{
+    throw '-UpdateOnly installs what is already on main and bumps nothing, so it cannot be combined with a version argument.';
+}
+
+if ($UpdateOnly -and $SkipUpdate)
+{
+    throw '-UpdateOnly only runs the update, so it cannot be combined with -SkipUpdate.';
+}
 
 $semVerPattern = '^\d+\.\d+\.\d+$';
 
@@ -149,122 +217,423 @@ if (-not (Test-Path -LiteralPath $pluginManifestPath -PathType Leaf))
     throw "No plugin manifest at '$pluginManifestPath'. Plugins under '$marketplaceRootFull': $knownText.";
 }
 
-$manifestRaw = Get-Content -Raw -LiteralPath $pluginManifestPath;
-$manifest = $manifestRaw | ConvertFrom-Json;
+$currentVersion = $null;
+$newVersion = $null;
+$mode = if ($UpdateOnly) { 'UpdateOnly' } else { $null };
+$branch = $null;
+$shipBranch = $null;
+$pullRequestUrl = $null;
+$commitSha = $null;
+$pushed = $false;
+$merged = $false;
 
-if (-not $manifest.PSObject.Properties.Name.Contains('version'))
+# -UpdateOnly installs what is already on main: no bump, no manifest write, no git, no gh.
+if (-not $UpdateOnly)
 {
-    throw "Plugin manifest '$pluginManifestPath' has no 'version' field to bump.";
-}
+    $manifestRaw = Get-Content -Raw -LiteralPath $pluginManifestPath;
+    $manifest = $manifestRaw | ConvertFrom-Json;
 
-$currentVersion = [string]$manifest.version;
-if ($currentVersion -notmatch $semVerPattern)
-{
-    throw "Current version '$currentVersion' in '$pluginManifestPath' is not a MAJOR.MINOR.PATCH version. Fix it by hand, then bump.";
-}
+    if (-not $manifest.PSObject.Properties.Name.Contains('version'))
+    {
+        throw "Plugin manifest '$pluginManifestPath' has no 'version' field to bump.";
+    }
 
-if ($Version -match $semVerPattern)
-{
-    $newVersion = $Version;
-}
-elseif ($Version -in @('Major', 'Minor', 'Patch'))
-{
-    $newVersion = Get-BumpedVersion -Current $currentVersion -Part $Version;
-}
-else
-{
-    throw "-Version must be a MAJOR.MINOR.PATCH version or one of Major, Minor, Patch. Got '$Version'.";
-}
+    $currentVersion = [string]$manifest.version;
+    if ($currentVersion -notmatch $semVerPattern)
+    {
+        throw "Current version '$currentVersion' in '$pluginManifestPath' is not a MAJOR.MINOR.PATCH version. Fix it by hand, then bump.";
+    }
 
-if (-not $AllowDowngrade -and ([version]$newVersion -le [version]$currentVersion))
-{
-    throw "Target version $newVersion is not greater than the current $currentVersion, so 'claude plugin update' would treat it as no change. Pass -AllowDowngrade if that is really what you want.";
-}
+    if ($Version -match $semVerPattern)
+    {
+        $newVersion = $Version;
+    }
+    elseif ($Version -in @('Major', 'Minor', 'Patch'))
+    {
+        $newVersion = Get-BumpedVersion -Current $currentVersion -Part $Version;
+    }
+    else
+    {
+        throw "-Version must be a MAJOR.MINOR.PATCH version or one of Major, Minor, Patch. Got '$Version'.";
+    }
 
-Write-Verbose "$Name@$Marketplace : $currentVersion -> $newVersion";
+    if (-not $AllowDowngrade -and ([version]$newVersion -le [version]$currentVersion))
+    {
+        throw "Target version $newVersion is not greater than the current $currentVersion, so 'claude plugin update' would treat it as no change. Pass -AllowDowngrade if that is really what you want.";
+    }
 
-# Replace the version value in place rather than round-tripping the JSON, so field order,
-# indentation and the prettier-canonical formatting all survive the bump.
-$versionValuePattern = '(?<lead>"version"\s*:\s*")' + [regex]::Escape($currentVersion) + '(?<trail>")';
-$replaced = [regex]::Replace($manifestRaw, $versionValuePattern, "`${lead}$newVersion`${trail}", 1);
-if ($replaced -eq $manifestRaw)
-{
-    throw "Could not locate the version value '$currentVersion' in '$pluginManifestPath'.";
-}
+    Write-Verbose "$Name@$Marketplace : $currentVersion -> $newVersion";
 
-$repoRoot = $null;
-$relativeManifestPath = $null;
-if (-not $SkipCommit)
-{
+    # Replace the version value in place rather than round-tripping the JSON, so field order,
+    # indentation and the prettier-canonical formatting all survive the bump.
+    $versionValuePattern = '(?<lead>"version"\s*:\s*")' + [regex]::Escape($currentVersion) + '(?<trail>")';
+    $replaced = [regex]::Replace($manifestRaw, $versionValuePattern, "`${lead}$newVersion`${trail}", 1);
+    if ($replaced -eq $manifestRaw)
+    {
+        throw "Could not locate the version value '$currentVersion' in '$pluginManifestPath'.";
+    }
+
+    $repoRoot = $null;
+    $relativeManifestPath = $null;
+    $mode = $null;
+    $branch = $null;
+    $shipBranch = $null;
+    $pullRequestUrl = $null;
+
     $repoRoot = git -C $pluginDir rev-parse --show-toplevel 2>$null;
     if ($LASTEXITCODE -ne 0 -or -not $repoRoot)
     {
-        throw "'$pluginDir' is not inside a git work tree, so the bump cannot be committed. Pass -SkipCommit to bump without committing.";
+        $repoRoot = $null;
+        if (-not $SkipCommit)
+        {
+            throw "'$pluginDir' is not inside a git work tree, so the bump cannot be committed. Pass -SkipCommit to bump without committing.";
+        }
     }
-
-    $repoRoot = (Resolve-Path -LiteralPath $repoRoot).Path;
-    $relativeManifestPath = [System.IO.Path]::GetRelativePath($repoRoot, $pluginManifestPath).Replace([System.IO.Path]::DirectorySeparatorChar, '/');
-}
-
-if ($PSCmdlet.ShouldProcess($pluginManifestPath, "set version to $newVersion"))
-{
-    Set-Content -LiteralPath $pluginManifestPath -Value $replaced -NoNewline;
-}
-
-$commitSha = $null;
-if (-not $SkipCommit)
-{
-    $commitMessage = "bump $Name plugin to $newVersion";
-
-    if ($PSCmdlet.ShouldProcess($relativeManifestPath, "commit `"$commitMessage`""))
+    else
     {
-        # Stage and commit this one path only; a pathspec commit ignores whatever else is
-        # in the index, so unrelated staged work is neither committed nor disturbed.
-        git -C $repoRoot add -- $relativeManifestPath;
-        if ($LASTEXITCODE -ne 0)
+        $repoRoot = (Resolve-Path -LiteralPath $repoRoot).Path;
+        $relativeManifestPath = [System.IO.Path]::GetRelativePath($repoRoot, $pluginManifestPath).Replace([System.IO.Path]::DirectorySeparatorChar, '/');
+
+        # The checked-out branch picks the mode: on main the bump ships through its own pull
+        # request; on any other branch it rides that branch.
+        $branch = git -C $repoRoot symbolic-ref --quiet --short HEAD 2>$null;
+        if ($LASTEXITCODE -ne 0 -or -not $branch)
         {
-            throw "git add failed for '$relativeManifestPath'.";
+            throw "HEAD is detached in '$repoRoot'. Check out a branch before shipping.";
         }
 
-        git -C $repoRoot commit --quiet -m $commitMessage -- $relativeManifestPath;
-        if ($LASTEXITCODE -ne 0)
-        {
-            throw "git commit failed for '$relativeManifestPath'.";
-        }
-
-        $commitSha = git -C $repoRoot rev-parse HEAD;
+        $mode = if ($branch -eq 'main') { 'PullRequest' } else { 'FeatureBranch' };
     }
-}
 
-$pushed = $false;
-if (-not $SkipCommit -and -not $SkipPush)
-{
-    if ($PSCmdlet.ShouldProcess($repoRoot, 'git push'))
+    if ($mode -eq 'PullRequest' -and -not $SkipCommit)
     {
-        # The marketplace clone fetches from the remote, so an unpushed bump ships nothing.
-        git -C $repoRoot push | Out-Host;
-        if ($LASTEXITCODE -ne 0)
+        $shipBranch = "ship/$Name-$newVersion";
+
+        if (-not $SkipPush -and -not (Get-Command gh -ErrorAction SilentlyContinue))
         {
-            throw "git push failed with exit code $LASTEXITCODE. The version bump is already committed; push it and re-run with -SkipCommit to finish shipping.";
+            throw "'gh' is not on PATH, so the pull request cannot be opened. Install it, or pass -SkipPush to stop after the local commit.";
         }
 
-        $pushed = $true;
+        # Fetch is read-only, so it runs under -WhatIf too.
+        git -C $repoRoot fetch --quiet origin;
+        if ($LASTEXITCODE -ne 0)
+        {
+            throw "git fetch origin failed with exit code $LASTEXITCODE. Nothing was changed.";
+        }
+
+        $headSha = git -C $repoRoot rev-parse HEAD;
+        $originSha = git -C $repoRoot rev-parse --verify --quiet refs/remotes/origin/main;
+        if ($LASTEXITCODE -ne 0 -or $headSha -ne $originSha)
+        {
+            throw "main ($headSha) is not at origin/main ($originSha). Bring main up to date with origin/main before shipping.";
+        }
+
+        git -C $repoRoot show-ref --verify --quiet "refs/heads/$shipBranch";
+        if ($LASTEXITCODE -eq 0)
+        {
+            throw "Branch '$shipBranch' already exists locally. Delete it or pick another version.";
+        }
+
+        git -C $repoRoot ls-remote --exit-code origin "refs/heads/$shipBranch" | Out-Null;
+        if ($LASTEXITCODE -eq 0)
+        {
+            throw "Branch '$shipBranch' already exists on origin. Delete it or pick another version.";
+        }
     }
+
+    if ($PSCmdlet.ShouldProcess($pluginManifestPath, "set version to $newVersion"))
+    {
+        Set-Content -LiteralPath $pluginManifestPath -Value $replaced -NoNewline;
+    }
+
+    $commitSha = $null;
+    $pushed = $false;
+    $merged = $false;
+    $onShipBranch = $false;
+
+    try
+    {
+        if (-not $SkipCommit)
+        {
+            $commitMessage = "bump $Name plugin to $newVersion";
+
+            if ($mode -eq 'PullRequest' -and $PSCmdlet.ShouldProcess($repoRoot, "create branch $shipBranch"))
+            {
+                git -C $repoRoot switch --quiet -c $shipBranch;
+                if ($LASTEXITCODE -ne 0)
+                {
+                    throw "git switch -c $shipBranch failed.";
+                }
+
+                $onShipBranch = $true;
+            }
+
+            if ($PSCmdlet.ShouldProcess($relativeManifestPath, "commit `"$commitMessage`""))
+            {
+                # Stage and commit this one path only; a pathspec commit ignores whatever else is
+                # in the index, so unrelated staged work is neither committed nor disturbed.
+                git -C $repoRoot add -- $relativeManifestPath;
+                if ($LASTEXITCODE -ne 0)
+                {
+                    throw "git add failed for '$relativeManifestPath'.";
+                }
+
+                git -C $repoRoot commit --quiet -m $commitMessage -- $relativeManifestPath;
+                if ($LASTEXITCODE -ne 0)
+                {
+                    throw "git commit failed for '$relativeManifestPath'.";
+                }
+
+                $commitSha = git -C $repoRoot rev-parse HEAD;
+            }
+        }
+
+        if (-not $SkipCommit -and -not $SkipPush)
+        {
+            $pushBranch = if ($mode -eq 'PullRequest') { $shipBranch } else { $branch };
+
+            if ($PSCmdlet.ShouldProcess($repoRoot, "git push $pushBranch"))
+            {
+                git -C $repoRoot rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>$null | Out-Null;
+                $hasUpstream = $LASTEXITCODE -eq 0;
+
+                if ($mode -eq 'FeatureBranch' -and $hasUpstream)
+                {
+                    git -C $repoRoot push | Out-Host;
+                }
+                else
+                {
+                    git -C $repoRoot push -u origin $pushBranch | Out-Host;
+                }
+
+                if ($LASTEXITCODE -ne 0)
+                {
+                    throw "git push failed with exit code $LASTEXITCODE. The bump is committed on '$pushBranch'; push it with 'git push -u origin $pushBranch' once the cause is fixed.";
+                }
+
+                $pushed = $true;
+            }
+
+            if ($mode -eq 'PullRequest' -and $pushed -and $PSCmdlet.ShouldProcess($shipBranch, 'gh pr create'))
+            {
+                Push-Location $repoRoot;
+                try
+                {
+                    $created = gh pr create --base main --head $shipBranch --title $commitMessage --body "Bump the $Name plugin from $currentVersion to $newVersion.";
+                    $createExit = $LASTEXITCODE;
+                }
+                finally
+                {
+                    Pop-Location;
+                }
+
+                if ($createExit -ne 0)
+                {
+                    throw "gh pr create failed with exit code $createExit. Branch '$shipBranch' is pushed; open the pull request by hand.";
+                }
+
+                $pullRequestUrl = @($created)[-1];
+            }
+        }
+
+        if ($mode -eq 'PullRequest' -and -not $SkipCommit -and -not $SkipPush)
+        {
+            if ($pullRequestUrl)
+            {
+                # Wait for every check to pass. No checks reported yet means keep waiting, not pass.
+                $failedStates = @('FAILURE', 'ERROR', 'TIMED_OUT', 'CANCELLED', 'ACTION_REQUIRED', 'STARTUP_FAILURE');
+                $clock = [System.Diagnostics.Stopwatch]::StartNew();
+                while ($true)
+                {
+                    $viewLines = gh pr view $pullRequestUrl --json 'statusCheckRollup,state';
+                    if ($LASTEXITCODE -ne 0)
+                    {
+                        throw "gh pr view failed with exit code $LASTEXITCODE while waiting for the checks of $pullRequestUrl.";
+                    }
+
+                    $view = ($viewLines -join "`n") | ConvertFrom-Json;
+                    if ("$($view.state)" -ne 'OPEN')
+                    {
+                        throw "The pull request $pullRequestUrl is $($view.state), not open, so it was not merged.";
+                    }
+
+                    $checks = @($view.statusCheckRollup | Where-Object { $_ });
+                    $pending = $false;
+                    foreach ($check in $checks)
+                    {
+                        if ($check.__typename -eq 'StatusContext')
+                        {
+                            $checkName = $check.context;
+                            $verdict = "$($check.state)".ToUpperInvariant();
+                            $isPending = $verdict -in 'PENDING', 'EXPECTED';
+                        }
+                        else
+                        {
+                            $checkName = $check.name;
+                            $verdict = "$($check.conclusion)".ToUpperInvariant();
+                            $isPending = "$($check.status)".ToUpperInvariant() -ne 'COMPLETED';
+                        }
+
+                        if ($isPending)
+                        {
+                            $pending = $true;
+                        }
+                        elseif ($verdict -in $failedStates)
+                        {
+                            throw "Check '$checkName' did not pass ($verdict) on $pullRequestUrl, so it was not merged.";
+                        }
+                    }
+
+                    if ($checks.Count -gt 0 -and -not $pending)
+                    {
+                        break;
+                    }
+
+                    if ($clock.Elapsed.TotalSeconds -ge $TimeoutSeconds)
+                    {
+                        throw "Timed out after $TimeoutSeconds seconds waiting for the checks of $pullRequestUrl, so it was not merged.";
+                    }
+
+                    Start-Sleep -Milliseconds ([int]($PollIntervalSeconds * 1000));
+                }
+            }
+
+            if ($PSCmdlet.ShouldProcess($shipBranch, 'gh pr merge'))
+            {
+                Push-Location $repoRoot;
+                try
+                {
+                    gh pr merge $pullRequestUrl --merge --delete-branch | Out-Host;
+                    $mergeExit = $LASTEXITCODE;
+                }
+                finally
+                {
+                    Pop-Location;
+                }
+
+                if ($mergeExit -eq 0)
+                {
+                    $merged = $true;
+                }
+                else
+                {
+                    # With the ship branch checked out, gh also does local work after the remote
+                    # merge and can fail there; the pull request's own state is the truth.
+                    $stateLines = gh pr view $pullRequestUrl --json state;
+                    $stateExit = $LASTEXITCODE;
+                    if ($stateExit -eq 0 -and (($stateLines -join "`n") | ConvertFrom-Json).state -eq 'MERGED')
+                    {
+                        $merged = $true;
+                    }
+                    else
+                    {
+                        throw "gh pr merge failed with exit code $mergeExit and the pull request is not merged. The checks passed; merge $pullRequestUrl by hand.";
+                    }
+                }
+            }
+
+            # Under -WhatIf nothing merged, but the steps that would follow are still listed.
+            if ($merged -or $WhatIfPreference)
+            {
+                if ($PSCmdlet.ShouldProcess($repoRoot, 'git switch main'))
+                {
+                    git -C $repoRoot switch --quiet main;
+                    if ($LASTEXITCODE -ne 0)
+                    {
+                        throw 'git switch main failed after the merge.';
+                    }
+
+                    $onShipBranch = $false;
+                }
+
+                if ($PSCmdlet.ShouldProcess($repoRoot, 'bring main up to date with origin/main'))
+                {
+                    # fetch plus merge rather than `git pull`, which refuses to run with staged changes.
+                    git -C $repoRoot fetch --quiet origin;
+                    if ($LASTEXITCODE -eq 0)
+                    {
+                        git -C $repoRoot merge --quiet --ff-only refs/remotes/origin/main;
+                    }
+
+                    if ($LASTEXITCODE -ne 0)
+                    {
+                        throw 'Bringing main up to date with origin/main failed after the merge.';
+                    }
+                }
+
+                # gh may already have removed the local branch together with the remote one.
+                git -C $repoRoot show-ref --verify --quiet "refs/heads/$shipBranch";
+                if (($LASTEXITCODE -eq 0 -or $WhatIfPreference) -and $PSCmdlet.ShouldProcess($shipBranch, 'delete the local ship branch'))
+                {
+                    git -C $repoRoot branch --quiet -d $shipBranch;
+                    if ($LASTEXITCODE -ne 0)
+                    {
+                        throw "Could not delete the merged local branch '$shipBranch'; delete it by hand.";
+                    }
+                }
+            }
+        }
+    }
+    catch
+    {
+        $notes = @();
+        if ($onShipBranch)
+        {
+            $notes += "The checkout is still on '$shipBranch'; 'git switch main' returns to main.";
+        }
+
+        if ($pullRequestUrl)
+        {
+            $notes += "The pull request is $pullRequestUrl.";
+        }
+
+        if ($merged)
+        {
+            $notes += 'The pull request is merged; finish with git switch main, git pull --ff-only (stash staged changes first), then claude plugin marketplace update and claude plugin update by hand.';
+        }
+
+        if ($notes)
+        {
+            throw "$($_.Exception.Message) $($notes -join ' ')";
+        }
+
+        throw;
+    }
+
+    if ($mode -eq 'FeatureBranch' -and -not $SkipCommit)
+    {
+        if ($pushed)
+        {
+            Write-Host "The bump is on '$branch', not on main. Once that branch has merged, install it with: ./Update-ClaudePlugin.ps1 $Name -UpdateOnly";
+        }
+        elseif ($commitSha)
+        {
+            Write-Host "The bump is committed locally on '$branch' but not pushed. Push it, and once that branch has merged, install it with: ./Update-ClaudePlugin.ps1 $Name -UpdateOnly";
+        }
+        else
+        {
+            Write-Host '-WhatIf: nothing was changed.';
+        }
+    }
+
 }
 
 $updated = $false;
-if (-not $SkipUpdate)
+# On main the installed copy updates only from the merged commit, or from what -SkipCommit left
+# in place; under -WhatIf the calls are listed.
+$wouldMerge = $WhatIfPreference -and $mode -eq 'PullRequest' -and -not $SkipCommit -and -not $SkipPush;
+if (-not $SkipUpdate -and $mode -ne 'FeatureBranch' -and ($UpdateOnly -or $merged -or $SkipCommit -or $wouldMerge))
 {
     $pluginId = "$Name@$Marketplace";
 
-    # The marketplace is a clone of the remote, so it has to fetch the pushed commit before
+    # The marketplace is a clone of the remote, so it has to fetch the merged commit before
     # the plugin update can find a new version to copy.
     if ($PSCmdlet.ShouldProcess($Marketplace, 'claude plugin marketplace update'))
     {
         claude plugin marketplace update $Marketplace | Out-Host;
         if ($LASTEXITCODE -ne 0)
         {
-            throw "'claude plugin marketplace update $Marketplace' failed with exit code $LASTEXITCODE. The version bump is already committed; re-run once the cause is fixed.";
+            throw "'claude plugin marketplace update $Marketplace' failed with exit code $LASTEXITCODE. The bump is merged on main; run that command by hand, then 'claude plugin update $pluginId'.";
         }
     }
 
@@ -275,7 +644,7 @@ if (-not $SkipUpdate)
         claude plugin update $pluginId | Out-Host;
         if ($LASTEXITCODE -ne 0)
         {
-            throw "'claude plugin update $pluginId' failed with exit code $LASTEXITCODE. The version bump is already committed; re-run the update once the cause is fixed.";
+            throw "'claude plugin update $pluginId' failed with exit code $LASTEXITCODE. The bump is merged on main; run that command by hand once the cause is fixed.";
         }
 
         $updated = $true;
@@ -283,12 +652,16 @@ if (-not $SkipUpdate)
 }
 
 [pscustomobject]@{
-    Name         = $Name
-    Marketplace  = $Marketplace
-    OldVersion   = $currentVersion
-    NewVersion   = $newVersion
-    ManifestPath = $pluginManifestPath
-    Commit       = $commitSha
-    Pushed       = $pushed
-    Updated      = $updated
+    Name           = $Name
+    Mode           = $mode
+    Branch         = if ($mode -eq 'PullRequest') { $shipBranch } else { $branch }
+    PullRequestUrl = $pullRequestUrl
+    Marketplace    = $Marketplace
+    OldVersion     = $currentVersion
+    NewVersion     = $newVersion
+    ManifestPath   = $pluginManifestPath
+    Commit         = $commitSha
+    Pushed         = $pushed
+    Merged         = $merged
+    Updated        = $updated
 }
