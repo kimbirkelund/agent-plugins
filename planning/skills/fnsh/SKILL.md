@@ -16,16 +16,16 @@ disable-model-invocation: true
 
 Shepherd the request — the branch's GitHub pull request or GitLab merge request
 — of a plan that `/impl` has finished, until it is merged. One script watches
-the request and streams events; you act on each one as it arrives.
+the request and exits with its events; you act on each one in order.
 
 ```
-find the plan ─> refuse unless DONE and on its Branch: ─> Monitor(Watch-PlanRequest) ─> per event, in order:
+find the plan ─> refuse unless DONE and on its Branch: ─> background Watch-PlanRequest ─> per event, in order:
                                                                                          ├─ pipeline-failed ─> fixer classifies ─> caused by branch: fix, verify, fixup!, push
                                                                                          ├─ comments ───────> fixer judges each ─> required: fix, verify, fixup!, push
                                                                                          ├─ conflict ───────> default target: fetch, rebase, fixer resolves, verify, user force-pushes
                                                                                          ├─ merged ─────────> Remove-PlanWorktree ─> finish hook ─> end
                                                                                          └─ closed / no-request ─> report ─> end
-user posts a prompt ─> TaskStop the monitor ─> answer ─> name unfinished events ─> do not restart
+user posts a prompt ─> TaskStop the watch ─> answer ─> name unfinished events ─> do not restart
 ```
 
 ## You are the team lead
@@ -87,51 +87,63 @@ Say once which plan you are running, by title and path, and the branch.
 
 ### 2. Start the watch
 
-Start the watch with the `Monitor` tool, with `command`:
+Start the watch with the `Bash` tool, with `run_in_background: true` and
+`command`:
 
 ```pwsh
-pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Watch-PlanRequest.ps1" -Branch <the plan's Branch:>
+pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Watch-PlanRequest.ps1" -Branch <the plan's Branch:> -UntilEvent
 ```
 
 - `description`: `request events for <branch>`
-- `timeout_ms`: `1800000`, the effective maximum. Larger values are capped to
-  it.
 
-Each stdout line is one JSON event and arrives as a notification. Wait for them.
-**Never poll**: do not read the monitor's output file, do not run the script
-with `-Once`, and do not query the forge yourself to see whether something
-changed. A failed poll goes to the script's stderr only and the loop keeps
-going; it produces no event.
+Record the task id the call returns; `TaskStop` needs it.
 
-How the monitor ends decides what you do:
+The command runs until a poll prints events, then exits. The exit re-invokes the
+session. Wait for it. **Never poll**: do not read the output file while the
+command runs, do not run the script with `-Once`, and do not query the forge
+yourself to see whether something changed. A failed poll goes to the script's
+stderr only and the loop keeps going; it produces no event.
 
-- **It times out** — start it again with the same arguments. This is the only
-  case that restarts it. The state file in the worktree's git directory records
-  what was already emitted, so a restart repeats nothing.
-- **The script exits non-zero** — it threw at startup (unknown tracker, missing
-  CLI, not a repository, and so on). Report its stderr and end. The run has
-  ended, so this turn prints the final run summary as _End every turn of an
-  active run with the run summary_ says.
-- **The script exits after a terminal event** (`merged`, `closed`, `no-request`)
-  — handle that event below. Never restart the monitor after it.
+**Take the events after the exit only.** Read them from the exit notification
+when it carries the output, otherwise from the output file it names, once. An
+event is a line that parses as a JSON object with an `Event` property; ignore
+every other line (failed-poll stderr). One exit can carry several events: handle
+them in the order printed.
+
+How the watch ends decides what you do:
+
+- **Exit 0 with a terminal event** (`merged`, `closed`, `no-request`) — handle
+  that event below. Never restart the watch after it.
+- **Exit 0 with only non-terminal events** — start the watch again with the same
+  arguments first, record its new task id, then handle the events.
+- **Stopped with the background time limit notice** — start it again with the
+  same arguments and record its new task id. The state file in the worktree's
+  git directory records what was already emitted, so a restart repeats nothing.
+- **The stop notice of a watch you ended with `TaskStop`** — needs no action.
+- **Any other exit** (non-zero, or exit 0 with no event) — the script threw at
+  startup (unknown tracker, missing CLI, not a repository, and so on), or ended
+  abnormally. Report its output and end. The run has ended, so this turn prints
+  the final run summary as _End every turn of an active run with the run
+  summary_ says.
 
 **When the user posts a prompt** — a message the user types, and only that.
-Monitor notifications and members' `SendMessage` reports are not prompts and do
-not stop anything. In this order:
+Exits of the background command and members' `SendMessage` reports are not
+prompts and do not stop anything. In this order:
 
-1. Stop the monitor with `TaskStop` before anything else.
+1. Stop the watch with `TaskStop` and its task id before anything else.
 2. Answer the prompt.
 3. Name every event you received but did not finish handling. Each was marked as
    emitted when it was printed and will not come again; a new `/fnsh` resumes
    the watch from the state file.
-4. Do not start the monitor again. The run has ended: this turn ends with the
+4. Do not start the watch again. The run has ended: this turn ends with the
    final run summary, as _End every turn of an active run with the run summary_
    says, and no later turn prints a run summary.
 
 ### 3. Act on each event
 
-Handle the events one at a time, in order of arrival. An event that arrives
-while you handle another waits its turn. The watch keeps running meanwhile.
+Handle the events one at a time, in the order printed. Unless one of them is
+terminal, the watch was already started again before you began, so an event that
+arrives while you handle another comes as a new exit and waits its turn.
 
 Every event carries `Event`, `Request` (`Number`, `Url`, `State`, `Target`,
 `TargetIsDefault`, `HeadSha`), `Pipeline` (`State`, `Id`, `FailedJobs` with
@@ -179,9 +191,9 @@ gets every verdict with its reason. Each comment is one item in the run summary.
 
 #### `conflict`
 
-**`Request.TargetIsDefault` false**: report the conflict and keep watching.
-Nothing is rebased. When the request is later retargeted and still conflicts,
-the conflict is handled again (see below).
+**`Request.TargetIsDefault` false**: report the conflict. The watch is already
+running again. Nothing is rebased. When the request is later retargeted and
+still conflicts, the conflict is handled again (see below).
 
 **`Request.TargetIsDefault` true**, with `<default>` being `Request.Target`:
 
@@ -206,7 +218,7 @@ the conflict is handled again (see below).
 7. Otherwise report that the branch is rebased and must be force-pushed by the
    user. You do not push.
 
-Either way the watch keeps running. A `conflict` comes again for a new head sha,
+Either way the watch stays running. A `conflict` comes again for a new head sha,
 which a force-push from the user produces, and also when the request's target
 branch changes. You then handle it as a new event under the `TargetIsDefault` it
 carries. Each occurrence is its own item in the run summary.
@@ -262,17 +274,18 @@ with the run summary_ says.
 
 ### 4. End every turn of an active run with the run summary
 
-The run is active from the first start of the monitor until it reaches an end
+The run is active from the first start of the watch until it reaches an end
 state. The end states are:
 
-- the user posts a prompt, which stops the monitor;
-- the script exits non-zero at startup;
+- the user posts a prompt, which stops the watch;
+- any other exit of the watch (non-zero, or exit 0 with no event);
 - a `no-request` event;
 - a `merged` event;
 - a `closed` event.
 
-A monitor timeout and restart does not end it, and neither does an item that
-failed its two fix rounds: the watch keeps going.
+A time-limit stop and restart, and a restart after non-terminal events, do not
+end it, and neither does an item that failed its two fix rounds: the watch keeps
+going.
 
 Every turn while the run is active ends with the full run summary. It covers
 everything since this `/fnsh` started, not only the turn just taken, and is
