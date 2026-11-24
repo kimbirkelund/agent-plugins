@@ -39,16 +39,82 @@ BeforeAll {
         }
     }
 
-    # Runs the hook as a child process; returns exit code, stdout and stderr.
+    # Runs the hook in this process with & and restores everything it can change;
+    # returns exit code, stdout and stderr as the child process did.
     function script:Invoke-Gate
     {
         param([string] $InputJson, [string] $StateRoot)
-        $errFile = Join-Path $TestDrive 'stderr.txt'
-        $out = & pwsh -NoProfile -File $script:Script -InputJson $InputJson -StateRoot $StateRoot -FlushDelayMs 0 2>$errFile
+        $envNames = 'PATH', 'XDG_CONFIG_HOME', '__CODE_ROOT', 'CLAUDE_PLANS_REPO'
+        $savedEnv = @{}
+        foreach ($name in $envNames)
+        {
+            $savedEnv[$name] = [Environment]::GetEnvironmentVariable($name)
+        }
+        $savedLocation = Get-Location
+        $savedOut = [Console]::Out
+        $savedError = [Console]::Error
+        $savedIn = [Console]::In
+        $savedErrorAction = $global:ErrorActionPreference
+        $savedErrorView = $global:ErrorView
+        $savedRendering = $PSStyle.OutputRendering
+        $savedExitCode = Get-Variable -Name LASTEXITCODE -Scope Global -ErrorAction Ignore
+        $outWriter = [IO.StringWriter]::new()
+        $errWriter = [IO.StringWriter]::new()
+        $pipeline = @()
+        $exitCode = 0
+        try
+        {
+            [Console]::SetOut($outWriter)
+            [Console]::SetError($errWriter)
+            [Console]::SetIn([IO.StringReader]::new(''))
+            $global:ErrorView = 'NormalView'
+            $PSStyle.OutputRendering = 'PlainText'
+            $global:LASTEXITCODE = 0
+            try
+            {
+                $pipeline = @(& $script:Script -InputJson $InputJson -StateRoot $StateRoot -FlushDelayMs 0 2>&1 |
+                        ForEach-Object {
+                            if ($_ -is [System.Management.Automation.ErrorRecord]) { $errWriter.WriteLine(($_ | Out-String).TrimEnd()) } else { $_ }
+                        })
+                $exitCode = $global:LASTEXITCODE
+            }
+            catch
+            {
+                $errWriter.WriteLine(($_ | Out-String).TrimEnd())
+                $exitCode = 1
+            }
+        }
+        finally
+        {
+            [Console]::SetOut($savedOut)
+            [Console]::SetError($savedError)
+            [Console]::SetIn($savedIn)
+            foreach ($name in $envNames)
+            {
+                [Environment]::SetEnvironmentVariable($name, $savedEnv[$name])
+            }
+            Set-Location -LiteralPath $savedLocation.Path
+            $global:ErrorActionPreference = $savedErrorAction
+            $global:ErrorView = $savedErrorView
+            $PSStyle.OutputRendering = $savedRendering
+            if ($savedExitCode)
+            {
+                $global:LASTEXITCODE = $savedExitCode.Value
+            }
+            else
+            {
+                Remove-Variable -Name LASTEXITCODE -Scope Global -ErrorAction Ignore
+            }
+        }
+        $consoleLines = @($outWriter.ToString() -split '\r?\n')
+        if ($consoleLines.Count -gt 0 -and $consoleLines[-1] -eq '')
+        {
+            $consoleLines = @($consoleLines | Select-Object -SkipLast 1)
+        }
         [pscustomobject]@{
-            ExitCode = $LASTEXITCODE
-            Stdout   = ($out -join "`n")
-            Stderr   = (Get-Content -LiteralPath $errFile -Raw)
+            ExitCode = $exitCode
+            Stdout   = (@($consoleLines) + @($pipeline | ForEach-Object { "$_" })) -join "`n"
+            Stderr   = $errWriter.ToString()
         }
     }
 
