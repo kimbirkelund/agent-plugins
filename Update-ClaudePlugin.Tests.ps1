@@ -776,6 +776,80 @@ Describe 'Update-ClaudePlugin' {
         }
     }
 
+    Context 'update only' {
+
+        It 'runs only the two claude calls, in order, and reports the mode' {
+            $f = New-Fixture -Version '0.1.0';
+            $result = & $script:ScriptPath -Name planning -UpdateOnly -MarketplaceRoot $f.MarketplaceRoot;
+
+            Get-ClaudeCalls $f.ClaudeLog | Should -Be @('plugin marketplace update agent-plugins', 'plugin update planning@agent-plugins');
+            $result.Mode | Should -Be 'UpdateOnly';
+            $result.Updated | Should -BeTrue;
+        }
+
+        It 'leaves the manifest byte-identical and makes no commit or push' {
+            $f = New-Fixture -Version '0.1.0';
+            $hash = (Get-FileHash -LiteralPath $f.ManifestPath).Hash;
+            $head = git -C $f.Root rev-parse HEAD;
+            $refs = @(git -C $f.Remote for-each-ref);
+            & $script:ScriptPath -Name planning -UpdateOnly -MarketplaceRoot $f.MarketplaceRoot | Out-Null;
+
+            (Get-FileHash -LiteralPath $f.ManifestPath).Hash | Should -Be $hash;
+            git -C $f.Root rev-parse HEAD | Should -Be $head;
+            @(git -C $f.Remote for-each-ref) | Should -Be $refs;
+            git -C $f.Root status --porcelain | Should -BeNullOrEmpty;
+        }
+
+        It 'works on a feature branch, staying on it' {
+            $f = New-Fixture -Version '0.1.0' -Branch 'feature/x';
+            & $script:ScriptPath -Name planning -UpdateOnly -MarketplaceRoot $f.MarketplaceRoot | Out-Null;
+
+            Get-ClaudeCalls $f.ClaudeLog | Should -Be @('plugin marketplace update agent-plugins', 'plugin update planning@agent-plugins');
+            git -C $f.Root branch --show-current | Should -Be 'feature/x';
+        }
+
+        It 'never calls gh and needs neither gh nor a git work tree' -Skip:$IsWindows {
+            $f = New-Fixture -Version '0.1.0' -NoGh -NoGit;
+            & $script:ScriptPath -Name planning -UpdateOnly -MarketplaceRoot $f.MarketplaceRoot | Out-Null;
+
+            Get-ClaudeCalls $f.ClaudeLog | Should -Be @('plugin marketplace update agent-plugins', 'plugin update planning@agent-plugins');
+        }
+
+        It 'never calls gh when it is present' {
+            $f = New-Fixture -Version '0.1.0';
+            & $script:ScriptPath -Name planning -UpdateOnly -MarketplaceRoot $f.MarketplaceRoot | Out-Null;
+
+            Test-Path -LiteralPath $f.GhLog | Should -BeFalse;
+        }
+
+        It 'refuses a bump argument' {
+            $f = New-Fixture -Version '0.1.0';
+
+            { & $script:ScriptPath -Name planning -Version Minor -UpdateOnly -MarketplaceRoot $f.MarketplaceRoot } |
+                Should -Throw -ExpectedMessage '*-UpdateOnly*version argument*';
+            { & $script:ScriptPath -Name planning '0.1.0' -UpdateOnly -MarketplaceRoot $f.MarketplaceRoot } |
+                Should -Throw -ExpectedMessage '*-UpdateOnly*version argument*';
+
+            Get-ClaudeCalls $f.ClaudeLog | Should -BeNullOrEmpty;
+        }
+
+        It 'refuses -SkipUpdate' {
+            $f = New-Fixture -Version '0.1.0';
+
+            { & $script:ScriptPath -Name planning -UpdateOnly -SkipUpdate -MarketplaceRoot $f.MarketplaceRoot } |
+                Should -Throw -ExpectedMessage '*-UpdateOnly*-SkipUpdate*';
+
+            Get-ClaudeCalls $f.ClaudeLog | Should -BeNullOrEmpty;
+        }
+
+        It 'makes no claude call with -WhatIf' {
+            $f = New-Fixture -Version '0.1.0';
+            & $script:ScriptPath -Name planning -UpdateOnly -MarketplaceRoot $f.MarketplaceRoot -WhatIf | Out-Null;
+
+            Get-ClaudeCalls $f.ClaudeLog | Should -BeNullOrEmpty;
+        }
+    }
+
     Context 'on a feature branch' {
 
         It 'commits and pushes the bump to that branch without an upstream' {
