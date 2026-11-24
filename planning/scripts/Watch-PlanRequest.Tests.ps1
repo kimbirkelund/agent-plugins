@@ -22,6 +22,35 @@ BeforeAll {
         )
     };
 
+    # One git config for the whole file, so no repository needs its own identity or
+    # commit.gpgsign setting and the developer's ~/.gitconfig is never read. The child
+    # pwsh the tests start inherits it through the environment.
+    $script:SavedGitConfigGlobal = $env:GIT_CONFIG_GLOBAL;
+    $gitConfig = Join-Path $TestDrive 'gitconfig';
+    Set-Content -LiteralPath $gitConfig -Value "[user]`n`tname = Test User`n`temail = test@example.com`n[commit]`n`tgpgsign = false`n";
+    $env:GIT_CONFIG_GLOBAL = $gitConfig;
+
+    # One template repository per forge, built once and copied per test; never handed to a
+    # test.
+    $script:RepoTemplates = @{};
+    $origins = @{
+        github  = 'git@github.com:group/widget.git'
+        gitlab  = 'git@gitlab.com:group/widget.git'
+        unknown = 'git@git.example.com:group/widget.git'
+    };
+    foreach ($forge in $origins.Keys)
+    {
+        $dir = Join-Path $TestDrive "template-$forge";
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null;
+        'code' | Set-Content -LiteralPath (Join-Path $dir 'file.txt');
+        git -C $dir init --quiet --initial-branch=main;
+        git -C $dir add -A;
+        git -C $dir commit --quiet -m 'initial';
+        git -C $dir switch --quiet -c feature/login;
+        git -C $dir remote add origin $origins[$forge];
+        $script:RepoTemplates[$forge] = $dir;
+    }
+
     function New-Fixture
     {
         param(
@@ -38,27 +67,14 @@ BeforeAll {
         $bin = Join-Path $base 'bin';
         $responses = Join-Path $base 'responses';
 
-        foreach ($dir in $repoRoot, $configHome, $bin, $responses)
+        foreach ($dir in $codeRoot, $configHome, $bin, $responses)
         {
             New-Item -ItemType Directory -Path $dir -Force | Out-Null;
         }
-        'code' | Set-Content -LiteralPath (Join-Path $repoRoot 'file.txt');
 
-        git -C $repoRoot init --quiet --initial-branch=main;
-        git -C $repoRoot config user.name 'Test User';
-        git -C $repoRoot config user.email 'test@example.com';
-        git -C $repoRoot config commit.gpgsign false;
-        git -C $repoRoot add -A;
-        git -C $repoRoot commit --quiet -m 'initial';
-        git -C $repoRoot switch --quiet -c feature/login;
-
-        $origin = switch ($Forge)
-        {
-            'github' { 'git@github.com:group/widget.git' }
-            'gitlab' { 'git@gitlab.com:group/widget.git' }
-            default { 'git@git.example.com:group/widget.git' }
-        }
-        git -C $repoRoot remote add origin $origin;
+        # A fresh copy of the template repository for this forge; its remote URL holds no
+        # path, so nothing is rewritten.
+        Copy-Item -LiteralPath $script:RepoTemplates[$Forge] -Destination $repoRoot -Recurse;
 
         New-Item -ItemType SymbolicLink -Path (Join-Path $bin 'git') -Target $script:RealGit | Out-Null;
         $cli = if ($Forge -eq 'gitlab') { 'glab' } else { 'gh' }
@@ -235,6 +251,10 @@ BeforeAll {
     {
         return @($Result.Events | ForEach-Object { $_.Event });
     }
+}
+
+AfterAll {
+    $env:GIT_CONFIG_GLOBAL = $script:SavedGitConfigGlobal;
 }
 
 Describe 'Watch-PlanRequest' {
