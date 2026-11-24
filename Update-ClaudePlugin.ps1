@@ -194,16 +194,70 @@ if ($replaced -eq $manifestRaw)
 
 $repoRoot = $null;
 $relativeManifestPath = $null;
-if (-not $SkipCommit)
+$mode = $null;
+$branch = $null;
+$shipBranch = $null;
+$pullRequestUrl = $null;
+
+$repoRoot = git -C $pluginDir rev-parse --show-toplevel 2>$null;
+if ($LASTEXITCODE -ne 0 -or -not $repoRoot)
 {
-    $repoRoot = git -C $pluginDir rev-parse --show-toplevel 2>$null;
-    if ($LASTEXITCODE -ne 0 -or -not $repoRoot)
+    $repoRoot = $null;
+    if (-not $SkipCommit)
     {
         throw "'$pluginDir' is not inside a git work tree, so the bump cannot be committed. Pass -SkipCommit to bump without committing.";
     }
-
+}
+else
+{
     $repoRoot = (Resolve-Path -LiteralPath $repoRoot).Path;
     $relativeManifestPath = [System.IO.Path]::GetRelativePath($repoRoot, $pluginManifestPath).Replace([System.IO.Path]::DirectorySeparatorChar, '/');
+
+    # The checked-out branch picks the mode: on main the bump ships through its own pull
+    # request; on any other branch it rides that branch.
+    $branch = git -C $repoRoot symbolic-ref --quiet --short HEAD 2>$null;
+    if ($LASTEXITCODE -ne 0 -or -not $branch)
+    {
+        throw "HEAD is detached in '$repoRoot'. Check out a branch before shipping.";
+    }
+
+    $mode = if ($branch -eq 'main') { 'PullRequest' } else { 'FeatureBranch' };
+}
+
+if ($mode -eq 'PullRequest' -and -not $SkipCommit)
+{
+    $shipBranch = "ship/$Name-$newVersion";
+
+    if (-not $SkipPush -and -not (Get-Command gh -ErrorAction SilentlyContinue))
+    {
+        throw "'gh' is not on PATH, so the pull request cannot be opened. Install it, or pass -SkipPush to stop after the local commit.";
+    }
+
+    # Fetch is read-only, so it runs under -WhatIf too.
+    git -C $repoRoot fetch --quiet origin;
+    if ($LASTEXITCODE -ne 0)
+    {
+        throw "git fetch origin failed with exit code $LASTEXITCODE. Nothing was changed.";
+    }
+
+    $headSha = git -C $repoRoot rev-parse HEAD;
+    $originSha = git -C $repoRoot rev-parse --verify --quiet refs/remotes/origin/main;
+    if ($LASTEXITCODE -ne 0 -or $headSha -ne $originSha)
+    {
+        throw "main ($headSha) is not at origin/main ($originSha). Bring main up to date with origin/main before shipping.";
+    }
+
+    git -C $repoRoot show-ref --verify --quiet "refs/heads/$shipBranch";
+    if ($LASTEXITCODE -eq 0)
+    {
+        throw "Branch '$shipBranch' already exists locally. Delete it or pick another version.";
+    }
+
+    git -C $repoRoot ls-remote --exit-code origin "refs/heads/$shipBranch" | Out-Null;
+    if ($LASTEXITCODE -eq 0)
+    {
+        throw "Branch '$shipBranch' already exists on origin. Delete it or pick another version.";
+    }
 }
 
 if ($PSCmdlet.ShouldProcess($pluginManifestPath, "set version to $newVersion"))
@@ -215,6 +269,15 @@ $commitSha = $null;
 if (-not $SkipCommit)
 {
     $commitMessage = "bump $Name plugin to $newVersion";
+
+    if ($mode -eq 'PullRequest' -and $PSCmdlet.ShouldProcess($repoRoot, "create branch $shipBranch"))
+    {
+        git -C $repoRoot switch --quiet -c $shipBranch;
+        if ($LASTEXITCODE -ne 0)
+        {
+            throw "git switch -c $shipBranch failed.";
+        }
+    }
 
     if ($PSCmdlet.ShouldProcess($relativeManifestPath, "commit `"$commitMessage`""))
     {
@@ -239,21 +302,71 @@ if (-not $SkipCommit)
 $pushed = $false;
 if (-not $SkipCommit -and -not $SkipPush)
 {
-    if ($PSCmdlet.ShouldProcess($repoRoot, 'git push'))
+    $pushBranch = if ($mode -eq 'PullRequest') { $shipBranch } else { $branch };
+
+    if ($PSCmdlet.ShouldProcess($repoRoot, "git push $pushBranch"))
     {
-        # The marketplace clone fetches from the remote, so an unpushed bump ships nothing.
-        git -C $repoRoot push | Out-Host;
+        git -C $repoRoot rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>$null | Out-Null;
+        $hasUpstream = $LASTEXITCODE -eq 0;
+
+        if ($mode -eq 'FeatureBranch' -and $hasUpstream)
+        {
+            git -C $repoRoot push | Out-Host;
+        }
+        else
+        {
+            git -C $repoRoot push -u origin $pushBranch | Out-Host;
+        }
+
         if ($LASTEXITCODE -ne 0)
         {
-            throw "git push failed with exit code $LASTEXITCODE. The version bump is already committed; push it and re-run with -SkipCommit to finish shipping.";
+            throw "git push failed with exit code $LASTEXITCODE. The version bump is already committed on '$pushBranch'; push it and re-run with -SkipCommit to finish shipping.";
         }
 
         $pushed = $true;
     }
+
+    if ($mode -eq 'PullRequest' -and $pushed -and $PSCmdlet.ShouldProcess($shipBranch, 'gh pr create'))
+    {
+        Push-Location $repoRoot;
+        try
+        {
+            $created = gh pr create --base main --head $shipBranch --title $commitMessage --body "Bump the $Name plugin from $currentVersion to $newVersion.";
+            $createExit = $LASTEXITCODE;
+        }
+        finally
+        {
+            Pop-Location;
+        }
+
+        if ($createExit -ne 0)
+        {
+            throw "gh pr create failed with exit code $createExit. Branch '$shipBranch' is pushed; open the pull request by hand.";
+        }
+
+        $pullRequestUrl = @($created)[-1];
+    }
+}
+
+if ($mode -eq 'FeatureBranch' -and -not $SkipCommit)
+{
+    if ($pushed)
+    {
+        Write-Host "The bump is on '$branch', not on main. Once that branch has merged, install it with: ./Update-ClaudePlugin.ps1 $Name -UpdateOnly";
+    }
+    elseif ($commitSha)
+    {
+        Write-Host "The bump is committed locally on '$branch' but not pushed. Push it, and once that branch has merged, install it with: ./Update-ClaudePlugin.ps1 $Name -UpdateOnly";
+    }
+    else
+    {
+        Write-Host '-WhatIf: nothing was changed.';
+    }
 }
 
 $updated = $false;
-if (-not $SkipUpdate)
+# Interim: on main this still runs right after the pull request is opened.
+if (-not $SkipUpdate -and $mode -ne 'FeatureBranch')
 {
     $pluginId = "$Name@$Marketplace";
 
@@ -283,12 +396,15 @@ if (-not $SkipUpdate)
 }
 
 [pscustomobject]@{
-    Name         = $Name
-    Marketplace  = $Marketplace
-    OldVersion   = $currentVersion
-    NewVersion   = $newVersion
-    ManifestPath = $pluginManifestPath
-    Commit       = $commitSha
-    Pushed       = $pushed
-    Updated      = $updated
+    Name           = $Name
+    Mode           = $mode
+    Branch         = if ($mode -eq 'PullRequest') { $shipBranch } else { $branch }
+    PullRequestUrl = $pullRequestUrl
+    Marketplace    = $Marketplace
+    OldVersion     = $currentVersion
+    NewVersion     = $newVersion
+    ManifestPath   = $pluginManifestPath
+    Commit         = $commitSha
+    Pushed         = $pushed
+    Updated        = $updated
 }
