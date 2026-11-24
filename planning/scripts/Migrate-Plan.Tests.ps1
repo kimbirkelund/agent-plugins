@@ -39,7 +39,7 @@ BeforeAll {
         $repoRoot = Join-Path $codeRoot 'widget';
         $plansRepo = Join-Path $codeRoot 'plans';
 
-        New-Item -ItemType Directory -Path $repoRoot -Force | Out-Null;
+        New-Item -ItemType Directory -Path $codeRoot -Force | Out-Null;
 
         $script:SavedEnv = @{
             XDG_CONFIG_HOME     = $env:XDG_CONFIG_HOME
@@ -58,14 +58,15 @@ BeforeAll {
         $env:GIT_COMMITTER_NAME = 'Test User';
         $env:GIT_COMMITTER_EMAIL = 'test@example.com';
 
-        'code' | Set-Content -LiteralPath (Join-Path $repoRoot 'f.txt');
-        if (-not $NoGit)
+        if ($NoGit)
         {
-            git -C $repoRoot init --quiet --initial-branch=main;
-            git -C $repoRoot config commit.gpgsign false;
-            git -C $repoRoot remote add origin 'https://example.com/group/widget.git';
-            git -C $repoRoot add -A;
-            git -C $repoRoot commit --quiet -m 'init';
+            New-Item -ItemType Directory -Path $repoRoot -Force | Out-Null;
+            'code' | Set-Content -LiteralPath (Join-Path $repoRoot 'f.txt');
+        }
+        else
+        {
+            # A fresh copy of the template repository; its remote URL holds no path.
+            Copy-Item -LiteralPath $script:RepoTemplate -Destination $repoRoot -Recurse;
         }
 
         $planPath = Join-Path $repoRoot 'PLAN.md';
@@ -122,6 +123,26 @@ BeforeAll {
         $params = @{ RepoPath = $Fixture.RepoRoot } + $Extra;
         return (& $script:ScriptPath @params | ConvertFrom-Json);
     }
+
+    # One git config for the whole file, so no repository needs its own identity or
+    # commit.gpgsign setting and the developer's ~/.gitconfig is never read.
+    $script:SavedGitConfigGlobal = $env:GIT_CONFIG_GLOBAL;
+    $gitConfig = Join-Path $TestDrive 'gitconfig';
+    Set-Content -LiteralPath $gitConfig -Value "[user]`n`tname = Test User`n`temail = test@example.com`n[commit]`n`tgpgsign = false`n";
+    $env:GIT_CONFIG_GLOBAL = $gitConfig;
+
+    # The committed code repository, built once and copied per test; never handed to a test.
+    $script:RepoTemplate = Join-Path $TestDrive "template-$([guid]::NewGuid().ToString('n').Substring(0, 8))";
+    New-Item -ItemType Directory -Path $script:RepoTemplate | Out-Null;
+    'code' | Set-Content -LiteralPath (Join-Path $script:RepoTemplate 'f.txt');
+    git -C $script:RepoTemplate init --quiet --initial-branch=main;
+    git -C $script:RepoTemplate remote add origin 'https://example.com/group/widget.git';
+    git -C $script:RepoTemplate add -A;
+    git -C $script:RepoTemplate commit --quiet -m 'init';
+}
+
+AfterAll {
+    $env:GIT_CONFIG_GLOBAL = $script:SavedGitConfigGlobal;
 }
 
 Describe 'Migrate-Plan' {

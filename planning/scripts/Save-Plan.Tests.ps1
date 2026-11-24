@@ -54,6 +54,43 @@ exit "${STUB_PRETTIER_RC:-0}"
         }
     }
 
+    # Builds the fixture tree under $Base: a code repository, and with -Existing a plans
+    # repository, and with -WithRemote a bare remote it tracks.
+    function Build-FixtureTree
+    {
+        param([string]$Base, [switch]$Existing, [switch]$WithRemote)
+
+        $codeRoot = Join-Path $Base 'code';
+        $repoRoot = Join-Path $codeRoot 'widget';
+        $plansRepo = Join-Path $codeRoot 'plans';
+
+        New-Item -ItemType Directory -Path $repoRoot -Force | Out-Null;
+        'code' | Set-Content -LiteralPath (Join-Path $repoRoot 'file.txt');
+        git -C $repoRoot init --quiet --initial-branch=main;
+        git -C $repoRoot add -A;
+        git -C $repoRoot commit --quiet -m 'initial';
+
+        $remote = Join-Path $Base 'remote.git';
+        if ($Existing)
+        {
+            New-Item -ItemType Directory -Path (Join-Path $plansRepo 'widget') -Force | Out-Null;
+            git -C $plansRepo init --quiet --initial-branch=main;
+            'seed' | Set-Content -LiteralPath (Join-Path $plansRepo 'widget/seed.md');
+            git -C $plansRepo add -A;
+            git -C $plansRepo commit --quiet -m 'seed';
+
+            if ($WithRemote)
+            {
+                # A local bare repository: a real upstream, no network.
+                git init --quiet --bare --initial-branch=main $remote;
+                git -C $plansRepo remote add origin "file://$remote";
+                git -C $plansRepo push --quiet -u origin main;
+            }
+        }
+    }
+
+    # Returns a fresh copy of the template built for these parameters, with the remote URL
+    # rewritten to the copy. A parameter set without a template is built directly.
     function New-Fixture
     {
         param([switch]$Existing, [switch]$WithRemote)
@@ -82,30 +119,19 @@ exit "${STUB_PRETTIER_RC:-0}"
         $env:GIT_COMMITTER_NAME = 'Test User';
         $env:GIT_COMMITTER_EMAIL = 'test@example.com';
 
-        New-Item -ItemType Directory -Path $repoRoot -Force | Out-Null;
-        'code' | Set-Content -LiteralPath (Join-Path $repoRoot 'file.txt');
-        git -C $repoRoot init --quiet --initial-branch=main;
-        git -C $repoRoot config commit.gpgsign false;
-        git -C $repoRoot add -A;
-        git -C $repoRoot commit --quiet -m 'initial';
-
         $remote = Join-Path $base 'remote.git';
-        if ($Existing)
+        $template = $script:Templates["$([bool]$Existing)|$([bool]$WithRemote)"];
+        if ($template)
         {
-            New-Item -ItemType Directory -Path (Join-Path $plansRepo 'widget') -Force | Out-Null;
-            git -C $plansRepo init --quiet --initial-branch=main;
-            git -C $plansRepo config commit.gpgsign false;
-            'seed' | Set-Content -LiteralPath (Join-Path $plansRepo 'widget/seed.md');
-            git -C $plansRepo add -A;
-            git -C $plansRepo commit --quiet -m 'seed';
-
-            if ($WithRemote)
+            Copy-Item -LiteralPath $template -Destination $base -Recurse;
+            if ($Existing -and $WithRemote)
             {
-                # A local bare repository: a real upstream, no network.
-                git init --quiet --bare --initial-branch=main $remote;
-                git -C $plansRepo remote add origin "file://$remote";
-                git -C $plansRepo push --quiet -u origin main;
+                git -C $plansRepo remote set-url origin "file://$remote";
             }
+        }
+        else
+        {
+            Build-FixtureTree -Base $base -Existing:$Existing -WithRemote:$WithRemote;
         }
 
         return [pscustomobject]@{
@@ -134,6 +160,26 @@ exit "${STUB_PRETTIER_RC:-0}"
         New-Item -ItemType Directory -Path $Fixture.PlanDir -Force | Out-Null;
         $Content | Set-Content -LiteralPath (Join-Path $Fixture.PlanDir $Name);
     }
+
+    # One git config for the whole file, so no repository needs its own identity or
+    # commit.gpgsign setting and the developer's ~/.gitconfig is never read.
+    $script:SavedGitConfigGlobal = $env:GIT_CONFIG_GLOBAL;
+    $gitConfig = Join-Path $TestDrive 'gitconfig';
+    Set-Content -LiteralPath $gitConfig -Value "[user]`n`tname = Test User`n`temail = test@example.com`n[commit]`n`tgpgsign = false`n";
+    $env:GIT_CONFIG_GLOBAL = $gitConfig;
+
+    # Templates, built once per parameter set and copied per test; never handed to a test.
+    $script:Templates = @{};
+    foreach ($set in @(@($false, $false), @($true, $false), @($true, $true)))
+    {
+        $dir = Join-Path $TestDrive "template-$([guid]::NewGuid().ToString('n').Substring(0, 8))";
+        Build-FixtureTree -Base $dir -Existing:$set[0] -WithRemote:$set[1];
+        $script:Templates["$($set[0])|$($set[1])"] = $dir;
+    }
+}
+
+AfterAll {
+    $env:GIT_CONFIG_GLOBAL = $script:SavedGitConfigGlobal;
 }
 
 Describe 'Save-Plan' {

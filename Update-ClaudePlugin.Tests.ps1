@@ -1,29 +1,31 @@
 BeforeAll {
     $script:ScriptPath = Join-Path $PSScriptRoot 'Update-ClaudePlugin.ps1';
 
-    # One self-contained fixture per test: a git work tree whose root is the marketplace,
-    # pushed to a bare local remote so the push step has somewhere to go, plus a fake
-    # `claude` on PATH that logs its arguments.
-    function New-Fixture
+    # Identity and signing for every git call in this file, from one config file instead
+    # of per-repository config.
+    $script:SavedGitConfigGlobal = $env:GIT_CONFIG_GLOBAL;
+    $script:GitConfigFile = Join-Path $TestDrive 'gitconfig';
+    "[user]`n`tname = Test User`n`temail = test@example.com`n[commit]`n`tgpgsign = false`n" | Set-Content -LiteralPath $script:GitConfigFile -NoNewline;
+    $env:GIT_CONFIG_GLOBAL = $script:GitConfigFile;
+
+    # Builds the git state of a fixture (work tree and bare remote) under $Base. Only the
+    # parameters that shape the repository matter; the shims are made per test.
+    function Build-Repo
     {
         param(
+            [string]$Base,
             [string]$PluginName = 'planning',
             [string]$Version = '0.1.0',
             [string]$MarketplaceName = 'agent-plugins',
             [switch]$NoMarketplaceManifest,
             [switch]$NoGit,
             [switch]$NoRemote,
-            [int]$ClaudeExitCode = 0,
-            [switch]$NoGh,
             [string]$Branch,
             [switch]$Upstream,
             [switch]$Detach
         )
 
-        # The fake claude and its log live outside the work tree, so they never show up
-        # as untracked files in the assertions about repository cleanliness.
-        $base = Join-Path $TestDrive ([guid]::NewGuid().ToString('n').Substring(0, 8));
-        $root = Join-Path $base 'repo';
+        $root = Join-Path $Base 'repo';
         # The marketplace manifest sits at the repository root, which is where a git-source
         # marketplace looks for it.
         $marketplaceRoot = $root;
@@ -60,9 +62,6 @@ BeforeAll {
         if (-not $NoGit)
         {
             git -C $root init --quiet --initial-branch=main;
-            git -C $root config user.name 'Test User';
-            git -C $root config user.email 'test@example.com';
-            git -C $root config commit.gpgsign false;
             git -C $root add -A;
             git -C $root commit --quiet -m 'fixture';
 
@@ -91,6 +90,88 @@ BeforeAll {
 
             if ($Detach) { git -C $root checkout --quiet --detach; }
         }
+    }
+
+    function Get-TemplateKey([hashtable]$Parameters)
+    {
+        # Defaults are filled in so an explicit default and an omitted one share a key.
+        $all = @{ PluginName = 'planning'; Version = '0.1.0'; MarketplaceName = 'agent-plugins' };
+        foreach ($name in $Parameters.Keys) { $all[$name] = $Parameters[$name]; }
+        $parts = foreach ($name in ($all.Keys | Sort-Object)) { "$name=$($all[$name])" }
+        return ($parts -join ';');
+    }
+
+    # One template per parameter set the tests use, built once and only ever copied.
+    $script:Templates = @{};
+    $templateSets = @(
+        @{},
+        @{ Version = '0.2.0' },
+        @{ Version = '1.4.7' },
+        @{ Version = '0.1.4' },
+        @{ Version = 'v1-beta' },
+        @{ NoMarketplaceManifest = $true },
+        @{ NoGit = $true },
+        @{ NoRemote = $true },
+        @{ Detach = $true },
+        @{ Branch = 'feature/x' },
+        @{ Branch = 'feature/x'; Upstream = $true }
+    );
+    foreach ($set in $templateSets)
+    {
+        $dir = Join-Path $TestDrive "template-$($script:Templates.Count)";
+        New-Item -ItemType Directory -Path $dir | Out-Null;
+        Build-Repo -Base $dir @set;
+        $script:Templates[(Get-TemplateKey $set)] = $dir;
+    }
+
+    # One self-contained fixture per test: a copy of a git work tree whose root is the
+    # marketplace, pushed to a bare local remote so the push step has somewhere to go,
+    # plus a fake `claude` on PATH that logs its arguments.
+    function New-Fixture
+    {
+        param(
+            [string]$PluginName = 'planning',
+            [string]$Version = '0.1.0',
+            [string]$MarketplaceName = 'agent-plugins',
+            [switch]$NoMarketplaceManifest,
+            [switch]$NoGit,
+            [switch]$NoRemote,
+            [int]$ClaudeExitCode = 0,
+            [switch]$NoGh,
+            [string]$Branch,
+            [switch]$Upstream,
+            [switch]$Detach
+        )
+
+        # The fake claude and its log live outside the work tree, so they never show up
+        # as untracked files in the assertions about repository cleanliness.
+        $base = Join-Path $TestDrive ([guid]::NewGuid().ToString('n').Substring(0, 8));
+        $root = Join-Path $base 'repo';
+        $marketplaceRoot = $root;
+        $pluginDir = Join-Path $marketplaceRoot $PluginName;
+
+        $repoParameters = @{};
+        foreach ($entry in $PSBoundParameters.GetEnumerator())
+        {
+            if ($entry.Key -notin 'ClaudeExitCode', 'NoGh') { $repoParameters[$entry.Key] = $entry.Value; }
+        }
+        $key = Get-TemplateKey $repoParameters;
+        if ($script:Templates.ContainsKey($key))
+        {
+            New-Item -ItemType Directory -Path $base | Out-Null;
+            Copy-Item -LiteralPath (Join-Path $script:Templates[$key] 'repo') -Destination $root -Recurse;
+            if (-not $NoGit -and -not $NoRemote)
+            {
+                Copy-Item -LiteralPath (Join-Path $script:Templates[$key] 'remote.git') -Destination (Join-Path $base 'remote.git') -Recurse;
+                git -C $root remote set-url origin (Join-Path $base 'remote.git');
+            }
+        }
+        else
+        {
+            New-Item -ItemType Directory -Path $base | Out-Null;
+            Build-Repo -Base $base @repoParameters;
+        }
+
 
         $binDir = Join-Path $base 'bin';
         New-Item -ItemType Directory -Path $binDir -Force | Out-Null;
@@ -224,6 +305,10 @@ exit 0
     {
         return @(git -C $Root show --pretty=format: --name-only HEAD | Where-Object { $_.Trim() });
     }
+}
+
+AfterAll {
+    $env:GIT_CONFIG_GLOBAL = $script:SavedGitConfigGlobal;
 }
 
 Describe 'Update-ClaudePlugin' {

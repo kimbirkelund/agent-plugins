@@ -18,28 +18,53 @@ BeforeAll {
         try { (& $script:Script @Params) | ConvertFrom-Json }
         finally { Pop-Location }
     }
+
+    # One git config for the whole file, so no repository needs its own identity and the
+    # developer's ~/.gitconfig is never read.
+    $script:SavedGitConfigGlobal = $env:GIT_CONFIG_GLOBAL;
+    $gitConfig = Join-Path $TestDrive 'gitconfig';
+    Set-Content -LiteralPath $gitConfig -Value "[user]`n`tname = Test User`n`temail = test@example.com`n[commit]`n`tgpgsign = false`n";
+    $env:GIT_CONFIG_GLOBAL = $gitConfig;
+
+    # The template, built once and copied per test; never handed to a test. It stops before
+    # the worktree is added, since a worktree stores absolute gitdir paths.
+    $script:Template = Join-Path $TestDrive 'template';
+    New-Item -ItemType Directory -Path $script:Template | Out-Null;
+    $tOrigin = Join-Path $script:Template 'origin.git';
+    $tMain = Join-Path $script:Template 'main';
+    $tOther = Join-Path $script:Template 'other';
+    git init --bare -b main $tOrigin *> $null;
+    git clone $tOrigin $tMain *> $null;
+    Invoke-Git $tMain @('commit', '--allow-empty', '-m', 'init') | Out-Null;
+    Invoke-Git $tMain @('push', 'origin', 'main') | Out-Null;
+    # Advance origin/main from a second clone, so a pull has something to fetch.
+    git clone $tOrigin $tOther *> $null;
+    Invoke-Git $tOther @('commit', '--allow-empty', '-m', 'merged') | Out-Null;
+    Invoke-Git $tOther @('push', 'origin', 'main') | Out-Null;
+}
+
+AfterAll {
+    $env:GIT_CONFIG_GLOBAL = $script:SavedGitConfigGlobal;
 }
 
 Describe 'Remove-PlanWorktree' {
     BeforeEach {
         $root = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));
-        New-Item -ItemType Directory -Path $root | Out-Null;
         $origin = Join-Path $root 'origin.git';
         $main = Join-Path $root 'main';
         $other = Join-Path $root 'other';
         $plan = Join-Path $root 'plan';
-        git init --bare -b main $origin *> $null;
-        git clone $origin $main *> $null;
-        Invoke-Git $main @('commit', '--allow-empty', '-m', 'init') | Out-Null;
-        Invoke-Git $main @('push', 'origin', 'main') | Out-Null;
+
+        # A fresh copy of the template (origin, main, and a second clone that advanced
+        # origin/main), with each copied clone's remote URL set to the copied origin.
+        Copy-Item -LiteralPath $script:Template -Destination $root -Recurse;
+        foreach ($clone in $main, $other)
+        {
+            Invoke-Git $clone @('remote', 'set-url', 'origin', $origin) | Out-Null;
+        }
         Invoke-Git $main @('worktree', 'add', '-b', 'plan-branch', $plan) | Out-Null;
         $mainReal = Invoke-Git $main @('rev-parse', '--show-toplevel');
         $planReal = Invoke-Git $plan @('rev-parse', '--show-toplevel');
-
-        # Advance origin/main from a second clone, so a pull has something to fetch.
-        git clone $origin $other *> $null;
-        Invoke-Git $other @('commit', '--allow-empty', '-m', 'merged') | Out-Null;
-        Invoke-Git $other @('push', 'origin', 'main') | Out-Null;
     }
 
     It 'pulls the target and removes the worktree' {
