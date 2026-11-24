@@ -1,34 +1,64 @@
 <#
 .SYNOPSIS
-    Ship a change to a plugin in this marketplace: bump its version, commit and push the
-    bump, refresh the marketplace, and pull the new version into the installed snapshot.
+    Ship a change to a plugin in this marketplace: bump its version, get the bump onto
+    main through a pull request, refresh the marketplace, and pull the new version into
+    the installed snapshot.
 
 .DESCRIPTION
-    This marketplace is registered from its git remote, not from this directory, so Claude
-    Code installs from a commit that has been pushed rather than from the work tree. That
-    is deliberate: a half-finished skill in the work tree is not live in every session, and
-    shipping is a gesture rather than a side effect of saving a file.
+    This marketplace is registered from its git remote's main branch, not from this
+    directory, so Claude Code installs from a commit that has been merged rather than from
+    the work tree. That is deliberate: a half-finished skill in the work tree is not live in
+    every session, and shipping is a gesture rather than a side effect of saving a file.
 
-    It also means four things have to happen in order, and all four are easy to forget:
+    Bumping `version` in the plugin's plugin.json is what makes `claude plugin update`
+    notice a change at all; it compares nothing else, so an unbumped change reports
+    "already at the latest version" and leaves the installed copy stale, with no error.
+    Only plugin.json is committed. Anything else in the work tree, staged or not, is left
+    exactly as it was, so an unfinished change stays unshipped even when the bump goes out.
 
-      1. bump `version` in the plugin's plugin.json — `claude plugin update` compares
-         nothing else, so an unbumped change reports "already at the latest version" and
-         leaves the installed copy stale, with no error;
-      2. commit it, and 3. push it, since the marketplace clone fetches from the remote;
-      4. `claude plugin marketplace update` so that clone sees the new commit, and only
-         then `claude plugin update`, which copies it into
+    The checked-out branch picks the mode. A detached HEAD is refused.
+
+    On main (pull request mode) the script never pushes to main:
+
+      1. it needs `gh` on PATH (unless -SkipPush or -SkipCommit is given) and main equal
+         to origin/main (it fetches first), and refuses if branch ship/<plugin>-<version>
+         already exists locally or on origin;
+      2. it bumps plugin.json and commits it on a new ship/<plugin>-<version> branch;
+      3. it pushes that branch and opens a pull request against main;
+      4. it polls the pull request every 10 seconds, up to -TimeoutSeconds, until every
+         check has passed (no checks reported yet means keep waiting); a failed or
+         cancelled check, a pull request that is no longer open, or a timeout throws
+         without merging, leaving the pull request as it is;
+      5. it merges with a merge commit and deletes the remote branch, switches back to
+         main, fast-forwards it to origin/main and deletes the local ship branch;
+      6. only then it runs `claude plugin marketplace update` so the marketplace clone sees
+         the merged commit, and `claude plugin update`, which copies the new version into
          ~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/.
 
-    Only the plugin's plugin.json is committed. Anything else in the work tree, staged or
-    not, is left exactly as it was — so an unfinished change stays unshipped even when the
-    bump goes out.
+    A failure after the ship branch was created leaves the checkout on it; the error says
+    so, and `git switch main` returns to main.
+
+    On any other branch (feature-branch mode) the bump is committed on that branch and the
+    branch is pushed (with -u origin <branch> when it has no upstream). No pull request is
+    opened, nothing is waited for or merged, `gh` is not needed, there is no fetch or
+    up-to-date guard, and neither `claude` command runs, because the bump is not on main
+    yet. The script ends by printing the command that installs it once the branch has
+    merged: ./Update-ClaudePlugin.ps1 <plugin> -UpdateOnly.
+
+    With -UpdateOnly the script installs what is already on main: it computes no version,
+    writes no manifest and makes no git or `gh` call, and runs only the marketplace
+    refresh and the plugin update. It works on any branch.
+
+    The result object carries Mode (PullRequest, FeatureBranch or UpdateOnly), Branch (the
+    ship branch, or the checked-out branch in feature-branch mode), PullRequestUrl, Pushed,
+    Merged and Updated beside the versions and the commit.
 
 .PARAMETER Name
     Plugin directory name under the marketplace root, e.g. 'planning'.
 
 .PARAMETER Version
     Either an explicit semantic version ('1.2.0') or the part to bump: Major, Minor or
-    Patch. Defaults to Patch.
+    Patch. Defaults to Patch. Cannot be combined with -UpdateOnly.
 
 .PARAMETER MarketplaceRoot
     Directory holding .claude-plugin/marketplace.json. Defaults to this script's directory.
@@ -41,28 +71,47 @@
     Permit a target version that is not greater than the current one.
 
 .PARAMETER SkipCommit
-    Write the new version but leave it uncommitted, and push nothing. The marketplace
-    refresh and the update still run, so they will find the previous commit — use it to
-    bump without shipping.
+    Write the new version and stop there: no guard, no branch, no commit, no push, no pull
+    request. On main the marketplace refresh and the plugin update still run, and find
+    whatever is already on main; in feature-branch mode nothing runs after the write.
 
 .PARAMETER SkipPush
-    Commit the bump but leave it unpushed. The marketplace fetches from the remote, so the
-    new version reaches the installed copy only once it is pushed.
+    Commit the bump and stop: on main on the local ship branch (the checkout stays on it),
+    in feature-branch mode on the checked-out branch. Nothing is pushed, no pull request
+    is opened, and no `claude` command runs.
 
 .PARAMETER SkipUpdate
-    Bump, commit and push, but do not refresh the marketplace or call
-    `claude plugin update`.
+    On main, do everything up to and including the merge but skip the marketplace refresh
+    and `claude plugin update`. In feature-branch mode it changes nothing, since those
+    commands never run there. Cannot be combined with -UpdateOnly.
+
+.PARAMETER UpdateOnly
+    Install the version that is already on main, without bumping anything. Refuses a
+    version argument and -SkipUpdate; -SkipCommit, -SkipPush, -AllowDowngrade and
+    -TimeoutSeconds are ignored with it.
+
+.PARAMETER TimeoutSeconds
+    How long to wait for the pull request's checks before giving up. Defaults to 900.
+    Only used on main.
 
 .EXAMPLE
     ./Update-ClaudePlugin.ps1 planning
-    Patch-bumps the planning plugin, commits and pushes the bump, refreshes the
-    marketplace, and updates the installed snapshot.
+    On main: patch-bumps the planning plugin on a ship branch, opens a pull request, waits
+    for its checks, merges it, returns to main, and updates the installed snapshot.
 
 .EXAMPLE
     ./Update-ClaudePlugin.ps1 planning Minor
+    On a feature branch: commits and pushes the bump there and prints the -UpdateOnly
+    command to run once the branch has merged.
+
+.EXAMPLE
+    ./Update-ClaudePlugin.ps1 planning -UpdateOnly
+    Refreshes the marketplace and updates the installed plugin from what is on main.
 
 .EXAMPLE
     ./Update-ClaudePlugin.ps1 planning 1.0.0 -WhatIf
+    Lists the actions, including the merge, the switch back to main and the `claude`
+    commands, without running any of them or changing anything.
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
