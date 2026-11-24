@@ -202,7 +202,99 @@ BeforeAll {
         Set-Response $Fixture 'project' @{ id = 345; default_branch = $DefaultBranch };
     }
 
+    # Runs the watch in this process with &, the way the child process ran it: working
+    # directory, PATH, config and code roots, plain unwrapped error rendering. Everything
+    # the call can change is restored afterwards. A watch without -Once polls until it
+    # ends, so it runs as a child process instead, which a timeout can kill.
     function Invoke-Watch($Fixture, [string[]]$Extra = @('-Once'), [switch]$DefaultState)
+    {
+        if ($Extra -notcontains '-Once') { return Invoke-WatchChild $Fixture $Extra -DefaultState:$DefaultState }
+
+        $scriptArguments = @($Extra);
+        if (-not $DefaultState) { $scriptArguments += @('-StatePath', $Fixture.StatePath) }
+        $namedArguments = @{};
+        for ($i = 0; $i -lt $scriptArguments.Count; $i++)
+        {
+            $name = $scriptArguments[$i].TrimStart('-');
+            if ($i + 1 -lt $scriptArguments.Count -and $scriptArguments[$i + 1] -notmatch '^-\w+$')
+            {
+                $namedArguments[$name] = $scriptArguments[$i + 1];
+                $i++;
+            }
+            else
+            {
+                $namedArguments[$name] = $true;
+            }
+        }
+
+        $envValues = @{
+            PATH              = $Fixture.Bin
+            XDG_CONFIG_HOME   = $Fixture.ConfigHome
+            __CODE_ROOT       = $Fixture.CodeRoot
+            CLAUDE_PLANS_REPO = $null
+        };
+        $savedEnv = @{};
+        foreach ($name in $envValues.Keys) { $savedEnv[$name] = [Environment]::GetEnvironmentVariable($name) }
+        $savedLocation = Get-Location;
+        $savedOut = [Console]::Out;
+        $savedError = [Console]::Error;
+        $savedIn = [Console]::In;
+        $savedErrorAction = $global:ErrorActionPreference;
+        $savedErrorView = $global:ErrorView;
+        $savedRendering = $PSStyle.OutputRendering;
+        $savedExitCode = Get-Variable -Name LASTEXITCODE -Scope Global -ErrorAction Ignore;
+        $outWriter = [IO.StringWriter]::new();
+        $errWriter = [IO.StringWriter]::new();
+        $pipeline = @();
+        $exitCode = 0;
+        try
+        {
+            foreach ($name in $envValues.Keys) { [Environment]::SetEnvironmentVariable($name, $envValues[$name]) }
+            Set-Location -LiteralPath $Fixture.RepoRoot;
+            [Console]::SetOut($outWriter);
+            [Console]::SetError($errWriter);
+            [Console]::SetIn([IO.StringReader]::new(''));
+            $global:ErrorView = 'NormalView';
+            $PSStyle.OutputRendering = 'PlainText';
+            $global:LASTEXITCODE = 0;
+            try
+            {
+                $pipeline = @(& $script:ScriptPath @namedArguments 2>&1 | ForEach-Object {
+                        if ($_ -is [System.Management.Automation.ErrorRecord]) { $errWriter.WriteLine(($_ | Out-String).TrimEnd()) } else { $_ }
+                    });
+                $exitCode = $global:LASTEXITCODE;
+            }
+            catch
+            {
+                $errWriter.WriteLine(($_ | Out-String -Width 4096).TrimEnd());
+                $exitCode = 1;
+            }
+        }
+        finally
+        {
+            [Console]::SetOut($savedOut);
+            [Console]::SetError($savedError);
+            [Console]::SetIn($savedIn);
+            foreach ($name in $envValues.Keys) { [Environment]::SetEnvironmentVariable($name, $savedEnv[$name]) }
+            Set-Location -LiteralPath $savedLocation.Path;
+            $global:ErrorActionPreference = $savedErrorAction;
+            $global:ErrorView = $savedErrorView;
+            $PSStyle.OutputRendering = $savedRendering;
+            if ($savedExitCode) { $global:LASTEXITCODE = $savedExitCode.Value }
+            else { Remove-Variable -Name LASTEXITCODE -Scope Global -ErrorAction Ignore }
+        }
+
+        $text = $outWriter.ToString() + (@($pipeline | ForEach-Object { "$_" }) -join "`n");
+        $lines = @($text -split "`r?`n" | Where-Object { $_.Trim() });
+        return [pscustomobject]@{
+            ExitCode = $exitCode
+            Lines    = $lines
+            Events   = @($lines | ForEach-Object { $_ | ConvertFrom-Json })
+            Stderr   = $errWriter.ToString()
+        }
+    }
+
+    function Invoke-WatchChild($Fixture, [string[]]$Extra = @('-Once'), [switch]$DefaultState)
     {
         $scriptArguments = @($Extra);
         if (-not $DefaultState) { $scriptArguments += @('-StatePath', $Fixture.StatePath) }
