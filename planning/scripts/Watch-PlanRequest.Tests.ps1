@@ -121,7 +121,8 @@ BeforeAll {
             [object[]]$Checks = @(),
             [object[]]$Comments = @(),
             [object[]]$Reviews = @(),
-            [string]$Base = 'main'
+            [string]$Base = 'main',
+            [string]$MergeState = 'CLEAN'
         )
 
         return [ordered]@{
@@ -131,6 +132,7 @@ BeforeAll {
             baseRefName       = $Base
             headRefOid        = $Sha
             mergeable         = $Mergeable
+            mergeStateStatus  = $MergeState
             statusCheckRollup = @($Checks)
             comments          = @($Comments)
             reviews           = @($Reviews)
@@ -150,19 +152,21 @@ BeforeAll {
             [string]$Sha = 'bbb222',
             [bool]$Conflicts = $false,
             $Pipeline = $null,
-            [string]$Target = 'main'
+            [string]$Target = 'main',
+            [string]$DetailedMergeStatus = 'mergeable'
         )
 
         return [ordered]@{
-            iid           = 12
-            project_id    = 345
-            web_url       = 'https://gitlab.com/group/widget/-/merge_requests/12'
-            state         = $State
-            target_branch = $Target
-            source_branch = 'feature/login'
-            sha           = $Sha
-            has_conflicts = $Conflicts
-            head_pipeline = $Pipeline
+            iid                   = 12
+            project_id            = 345
+            web_url               = 'https://gitlab.com/group/widget/-/merge_requests/12'
+            state                 = $State
+            target_branch         = $Target
+            source_branch         = 'feature/login'
+            sha                   = $Sha
+            has_conflicts         = $Conflicts
+            detailed_merge_status = $DetailedMergeStatus
+            head_pipeline         = $Pipeline
         };
     }
 
@@ -537,6 +541,92 @@ Describe 'Watch-PlanRequest' {
             @($result.Events[0].Comments).Id | Should -Be @('IC_2');
         }
 
+        It 'prints behind for a GitHub request whose merge state is BEHIND' {
+            $f = New-Fixture -Forge github;
+            Set-GitHub $f (New-PullRequest -MergeState BEHIND -Sha 'abc123');
+
+            $result = Invoke-Watch $f;
+
+            Get-EventNames $result | Should -Be @('behind');
+            $result.Events[0].Behind | Should -BeTrue;
+            $result.Events[0].Conflicted | Should -BeFalse;
+            $result.Events[0].Request.HeadSha | Should -Be 'abc123';
+        }
+
+        It 'prints nothing for GitHub merge states CLEAN and UNKNOWN' {
+            foreach ($mergeState in 'CLEAN', 'UNKNOWN')
+            {
+                $f = New-Fixture -Forge github;
+                Set-GitHub $f (New-PullRequest -MergeState $mergeState);
+
+                Get-EventNames (Invoke-Watch $f) | Should -Be @('none');
+            }
+        }
+
+        It 'prints only conflict for a GitHub request that is conflicting and DIRTY' {
+            $f = New-Fixture -Forge github;
+            Set-GitHub $f (New-PullRequest -Mergeable CONFLICTING -MergeState DIRTY);
+
+            Get-EventNames (Invoke-Watch $f) | Should -Be @('conflict');
+        }
+
+        It 'prints only conflict for a GitHub request that is conflicting and BEHIND' {
+            $f = New-Fixture -Forge github;
+            Set-GitHub $f (New-PullRequest -Mergeable CONFLICTING -MergeState BEHIND);
+
+            Get-EventNames (Invoke-Watch $f) | Should -Be @('conflict');
+            Get-EventNames (Invoke-Watch $f) | Should -Be @('none');
+        }
+
+        It 'prints only conflict for a GitLab request that has conflicts and needs a rebase' {
+            $f = New-Fixture -Forge gitlab;
+            Set-GitLab $f (New-MergeRequest -Conflicts $true -DetailedMergeStatus need_rebase);
+
+            Get-EventNames (Invoke-Watch $f) | Should -Be @('conflict');
+            Get-EventNames (Invoke-Watch $f) | Should -Be @('none');
+        }
+
+        It 'prints behind for a GitLab request that needs a rebase' {
+            $f = New-Fixture -Forge gitlab;
+            Set-GitLab $f (New-MergeRequest -DetailedMergeStatus need_rebase);
+
+            $result = Invoke-Watch $f;
+
+            Get-EventNames $result | Should -Be @('behind');
+            $result.Events[0].Behind | Should -BeTrue;
+        }
+
+        It 'does not report the same behind head sha twice' {
+            $f = New-Fixture -Forge github;
+            Set-GitHub $f (New-PullRequest -MergeState BEHIND -Sha 'same');
+            Get-EventNames (Invoke-Watch $f) | Should -Be @('behind');
+            Get-EventNames (Invoke-Watch $f) | Should -Be @('none');
+        }
+
+        It 'reports behind again for a new head sha that is behind' {
+            $f = New-Fixture -Forge github;
+            Set-GitHub $f (New-PullRequest -MergeState BEHIND -Sha 'one');
+            Get-EventNames (Invoke-Watch $f) | Should -Be @('behind');
+
+            Set-GitHub $f (New-PullRequest -MergeState BEHIND -Sha 'two');
+            $result = Invoke-Watch $f;
+
+            Get-EventNames $result | Should -Be @('behind');
+            $result.Events[0].Request.HeadSha | Should -Be 'two';
+        }
+
+        It 're-reports behind after a retarget with the same head sha' {
+            $f = New-Fixture -Forge github;
+            Set-GitHub $f (New-PullRequest -MergeState BEHIND -Sha 'same' -Base 'release') -DefaultBranch 'main';
+            Get-EventNames (Invoke-Watch $f) | Should -Be @('behind');
+
+            Set-GitHub $f (New-PullRequest -MergeState BEHIND -Sha 'same' -Base 'main');
+            $result = Invoke-Watch $f;
+
+            Get-EventNames $result | Should -Be @('behind');
+            $result.Events[0].Request.Target | Should -Be 'main';
+        }
+
         It 're-arms conflict for a new head sha' {
             $f = New-Fixture -Forge gitlab;
             Set-GitLab $f (New-MergeRequest -Conflicts $true -Sha 'one');
@@ -594,6 +684,15 @@ Describe 'Watch-PlanRequest' {
             Set-GitLab $f (New-MergeRequest -Conflicts $true -Sha 'same');
             Get-EventNames (Invoke-Watch $f) | Should -Be @('conflict');
             Get-EventNames (Invoke-Watch $f) | Should -Be @('none');
+            Get-EventNames (Invoke-Watch $f) | Should -Be @('none');
+        }
+
+        It 'reads a state file without Behinds and emits behind once' {
+            $f = New-Fixture -Forge github;
+            @{ Conflicts = @(); Pipelines = @(); Comments = @(); Target = 'main' } | ConvertTo-Json | Set-Content -LiteralPath $f.StatePath;
+            Set-GitHub $f (New-PullRequest -MergeState BEHIND -Sha 'same');
+
+            Get-EventNames (Invoke-Watch $f) | Should -Be @('behind');
             Get-EventNames (Invoke-Watch $f) | Should -Be @('none');
         }
 
