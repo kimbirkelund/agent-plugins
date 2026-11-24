@@ -58,11 +58,13 @@ create the request; with none for the branch it says so and stops.
 
 `scripts/Watch-PlanRequest.ps1` polls the request and prints one JSON event per
 line: `pipeline-failed`, `comments`, `conflict`, and the three that end the
-watch, `merged`, `closed` and `no-request`. `/fnsh` runs it with the `Monitor`
-tool, restarts it when the monitor expires, and handles the events in order of
-arrival. What was already emitted is kept in `fnsh-state.json` in the worktree's
-git directory, so a restarted watch repeats nothing. On GitHub a re-run of
-failed checks on the same head sha gives no new event.
+watch, `merged`, `closed` and `no-request`. `/fnsh` runs it with `-UntilEvent`
+as a background command that exits when the request has an event. The exit is
+the only thing that wakes the session. Unless an event ends the watch, `/fnsh`
+starts the watch again, then handles the events in the order printed. What was
+already emitted is kept in `fnsh-state.json` in the worktree's git directory, so
+a restarted watch repeats nothing. On GitHub a re-run of failed checks on the
+same head sha gives no new event.
 
 - **A failed pipeline** is classified. A failure the branch's changes caused is
   fixed, verified with the plan's `Verify:` line, committed as a `fixup!` on the
