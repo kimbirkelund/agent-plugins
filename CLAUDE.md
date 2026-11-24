@@ -75,10 +75,18 @@ behavior change without a test change is incomplete.
 ```pwsh
 ./Invoke-PesterTests.ps1                                   # every *.Tests.ps1 in the repo
 ./Invoke-PesterTests.ps1 -Path ./planning/scripts/Get-PlanList.Tests.ps1
+./Invoke-PesterTests.ps1 -Workers 1                        # one process, one Pester run
 ```
 
 The runner installs Pester v5 for the current user if it is missing and exits
 non-zero when any test or test file fails. Run it before shipping.
+
+`-Workers` sets how many test files run at once, each in its own child `pwsh`,
+largest file first. It defaults to the smaller of 4 and the processor count.
+Each file's output is printed whole when that file finishes, followed by one
+totals line. A child that exits without reporting a result counts as a failure.
+`-Workers 1` runs every file in the runner's own process, in a single Pester
+run, which is easier to debug.
 
 ## CI pipeline
 
