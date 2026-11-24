@@ -718,6 +718,91 @@ Describe 'Watch-PlanRequest' {
         }
     }
 
+    Context 'until an event' {
+
+        It 'exits after a poll that prints one non-terminal event' {
+            $f = New-Fixture -Forge github;
+            Set-GitHub $f (New-PullRequest -Mergeable CONFLICTING);
+
+            $result = Invoke-Watch $f @('-UntilEvent', '-IntervalSeconds', '0.1');
+
+            $result.ExitCode | Should -Be 0;
+            Get-EventNames $result | Should -Be @('conflict');
+            Get-Content -LiteralPath (Join-Path $f.Responses 'pr.count') | Should -Be '1';
+        }
+
+        It 'prints every event of the poll before it exits' {
+            $f = New-Fixture -Forge github;
+            $checks = @(@{ __typename = 'CheckRun'; name = 'test'; status = 'COMPLETED'; conclusion = 'FAILURE'; detailsUrl = 'https://github.com/group/widget/actions/runs/1/job/11' });
+            Set-GitHub $f (New-PullRequest -Mergeable CONFLICTING -Checks $checks);
+
+            $result = Invoke-Watch $f @('-UntilEvent', '-IntervalSeconds', '0.1');
+
+            $result.ExitCode | Should -Be 0;
+            Get-EventNames $result | Should -Be @('conflict', 'pipeline-failed');
+            Get-Content -LiteralPath (Join-Path $f.Responses 'pr.count') | Should -Be '1';
+        }
+
+        It 'keeps polling after an empty poll and exits after the poll with an event' {
+            $f = New-Fixture -Forge github;
+            Set-GitHub $f (New-PullRequest);
+            Set-Response $f 'pr' (New-PullRequest -Mergeable CONFLICTING) -Call 2;
+
+            $result = Invoke-Watch $f @('-UntilEvent', '-IntervalSeconds', '0.1');
+
+            $result.ExitCode | Should -Be 0;
+            Get-EventNames $result | Should -Be @('conflict');
+            Get-Content -LiteralPath (Join-Path $f.Responses 'pr.count') | Should -Be '2';
+        }
+
+        It 'keeps polling after a failed poll and exits after the poll with an event' {
+            $f = New-Fixture -Forge github;
+            Set-GitHub $f (New-PullRequest -Mergeable CONFLICTING);
+            Set-Response $f 'pr' '' -Call 1 -ExitCode 1 -Stderr 'error connecting to api.github.com';
+
+            $result = Invoke-Watch $f @('-UntilEvent', '-IntervalSeconds', '0.1');
+
+            $result.ExitCode | Should -Be 0;
+            Get-EventNames $result | Should -Be @('conflict');
+            $result.Stderr | Should -Match 'poll failed.*error connecting to api\.github\.com';
+            Get-Content -LiteralPath (Join-Path $f.Responses 'pr.count') | Should -Be '2';
+        }
+
+        It 'prints a terminal event and exits 0 as without the switch' {
+            $f = New-Fixture -Forge github;
+            Set-GitHub $f (New-PullRequest -State MERGED);
+
+            $result = Invoke-Watch $f @('-UntilEvent', '-IntervalSeconds', '0.1');
+
+            $result.ExitCode | Should -Be 0;
+            Get-EventNames $result | Should -Be @('merged');
+        }
+
+        It 'throws on -Once with -UntilEvent before any poll' {
+            $f = New-Fixture -Forge github;
+            Set-GitHub $f (New-PullRequest -Mergeable CONFLICTING);
+
+            $result = Invoke-Watch $f @('-Once', '-UntilEvent');
+
+            $result.ExitCode | Should -Not -Be 0;
+            $result.Stderr | Should -Match 'Pass -Once or -UntilEvent, not both\.';
+            $result.Lines.Count | Should -Be 0;
+            Test-Path (Join-Path $f.Responses 'pr.count') | Should -BeFalse;
+        }
+
+        It 'without the switch continues after a non-terminal event until merged' {
+            $f = New-Fixture -Forge github;
+            Set-GitHub $f (New-PullRequest -Mergeable CONFLICTING);
+            Set-Response $f 'pr' (New-PullRequest -State MERGED) -Call 2;
+
+            $result = Invoke-Watch $f @('-IntervalSeconds', '0.1');
+
+            $result.ExitCode | Should -Be 0;
+            Get-EventNames $result | Should -Be @('conflict', 'merged');
+            Get-Content -LiteralPath (Join-Path $f.Responses 'pr.count') | Should -Be '2';
+        }
+    }
+
     Context 'pagination' {
 
         It 'reads inline review threads from every page' {

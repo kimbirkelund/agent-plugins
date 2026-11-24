@@ -47,6 +47,10 @@
     A failed poll (network, CLI error) is written to stderr and the loop continues; with
     -Once the script exits 1 instead.
 
+    With -UntilEvent the script exits 0 after the first poll that prints any event, so one
+    run reports one batch of events and ends. A poll that prints nothing, and a failed
+    poll, still sleep and poll again. -Once and -UntilEvent exclude each other.
+
 .PARAMETER Branch
     Source branch of the request to watch. Defaults to the checked-out branch.
 
@@ -55,6 +59,10 @@
 
 .PARAMETER Once
     Poll once, then exit.
+
+.PARAMETER UntilEvent
+    Keep polling until a poll prints an event, then exit 0. Every event that poll applies
+    is printed first. Cannot be combined with -Once.
 
 .PARAMETER StatePath
     File recording what was already emitted. Defaults to fnsh-state.json in the work
@@ -68,6 +76,9 @@
 
 .EXAMPLE
     pwsh -File Watch-PlanRequest.ps1 -Branch feature/login -Once
+
+.EXAMPLE
+    pwsh -File Watch-PlanRequest.ps1 -UntilEvent
 #>
 [CmdletBinding()]
 param(
@@ -78,8 +89,15 @@ param(
 
     [switch]$Once,
 
+    [switch]$UntilEvent,
+
     [string]$StatePath
 )
+
+if ($Once -and $UntilEvent)
+{
+    throw 'Pass -Once or -UntilEvent, not both.';
+}
 
 $ErrorActionPreference = 'Stop';
 $PSNativeCommandUseErrorActionPreference = $false;
@@ -490,6 +508,7 @@ while ($true)
         if (-not $result.Printed) { Write-Event 'none' $null }
         exit 0;
     }
+    if ($UntilEvent -and $result.Printed) { exit 0 }
 
     Start-Sleep -Milliseconds ([int]($IntervalSeconds * 1000));
 }
