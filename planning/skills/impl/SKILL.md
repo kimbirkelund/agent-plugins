@@ -209,7 +209,22 @@ when it did not — you were run directly.
 1. **If the plan already has a `Branch:` item**, the work already has a home —
    `/oimpl` made it, or a previous run did — and the gate has already confirmed
    it is the checked-out branch. Create nothing.
-2. **Otherwise invoke the user's worktree hook**, which `Get-PlanContext.ps1`
+2. **Otherwise ask where the work belongs** before any hook runs:
+
+   ```pwsh
+   pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Resolve-PlanBranch.ps1" -Plan <absolute plan path>
+   ```
+
+   If it throws, report its message verbatim and stop. It prints a `Mode`:
+   - **`stacked`** — the plan's `Stacks-on:` names a `DONE` plan whose branch
+     this one continues. Invoke no hook and create nothing. If
+     `git branch --show-current` is not the returned `Branch`, refuse: name both
+     branches and the returned `Path`, the worktree holding that branch or the
+     repository root when none does, and stop. Otherwise skip to step 3 with the
+     returned `Branch`.
+   - **`new`** — nothing exists yet. Continue with the hook, as follows.
+
+   For `new`, invoke the user's worktree hook, which `Get-PlanContext.ps1`
    returns as `Worktree`:
    - **`Worktree.Skill`** — invoke that skill. Hand it a short kebab-case slug
      derived from the plan's title and the repository root; it decides between a
@@ -219,10 +234,11 @@ when it did not — you were run directly.
      root, `{name}` by the slug, and `{plan}` by the plan's absolute path.
    - **absent** — no hook is configured, so there is nothing to create. Say once
      that the work will land on the checked-out branch, and carry on there.
+
 3. **Record what came back** as a `- Branch:` list item in the plan's header
    list (in the bare form when the plan is still bare; the save converts it),
-   after this succeeds (with no hook, pass the checked-out branch from
-   `git branch --show-current`):
+   after this succeeds (for `stacked`, pass the returned `Branch`; with no hook,
+   pass the checked-out branch from `git branch --show-current`):
 
    ```pwsh
    pwsh -File "${CLAUDE_PLUGIN_ROOT}/scripts/Resolve-PlanBranch.ps1" -Plan <absolute plan path> -Branch <the branch the hook returned>
@@ -488,7 +504,9 @@ re-checking each step. When the result means no roll-up, each standing `fixup!`
 you list under `## Divergences` names the commit it belongs to, so the next
 reader can apply it in their head. Check rather than assume the branch is
 unpublished: the worktree hook normally makes a fresh one, but it may have
-checked out an existing branch.
+checked out an existing branch, and a stacked plan continues its owner's, which
+may well be published. A stacked plan's `Base:` is the `HEAD` it started from,
+above the owner's commits, so the roll-up range never reaches them.
 
 ### Reviewing
 
