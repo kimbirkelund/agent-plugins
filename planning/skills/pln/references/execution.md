@@ -184,8 +184,9 @@ has used a round under the retry bound.
 `git rev-parse @{upstream}`. If it fails, the branch is unpublished and every
 roll-up proceeds. If it succeeds, no roll-up happens for the run and the
 standing `fixup!` commits are listed under `## Divergences`. `/impl` never
-pushes and the worktree hook makes a fresh branch, so the unpublished case is
-the normal one, and the published case is rare enough to leave messy rather than
+pushes and the worktree hook normally makes a fresh branch, so the unpublished
+case is the normal one, and the published case — an existing branch, or a
+stacked plan continuing its owner's — is rare enough to leave messy rather than
 rewrite.
 
 **The final report has a fixed shape.** Plan title and path; branch and
@@ -224,18 +225,19 @@ Three consequences the two halves have to agree on:
 The header block is a list, one item per field, and each item has one owner. A
 plan in the old bare form (`Status: ...`) is converted by the next save:
 
-| Item       | Written by                        | Meaning                                                          |
-| ---------- | --------------------------------- | ---------------------------------------------------------------- |
-| `Status:`  | both, per the table below         | Where the plan is in its life.                                   |
-| `Updated:` | `/pln`, on every write            | Date of the last planning change, from `date +%F`.               |
-| `Repo:`    | `/pln`, once at creation          | The repository the plan is about. The file no longer sits in it. |
-| `Branch:`  | `/oimpl`, or `/impl` run directly | Where the work lands. Also how a fresh `/impl` finds this plan.  |
-| `Base:`    | `/impl`, before the first commit  | The `git rebase --autosquash` target for rolled-up fixups.       |
+| Item         | Written by                        | Meaning                                                          |
+| ------------ | --------------------------------- | ---------------------------------------------------------------- |
+| `Status:`    | both, per the table below         | Where the plan is in its life.                                   |
+| `Updated:`   | `/pln`, on every write            | Date of the last planning change, from `date +%F`.               |
+| `Repo:`      | `/pln`, once at creation          | The repository the plan is about. The file no longer sits in it. |
+| `Branch:`    | `/oimpl`, or `/impl` run directly | Where the work lands. Also how a fresh `/impl` finds this plan.  |
+| `Base:`      | `/impl`, before the first commit  | The `git rebase --autosquash` target for rolled-up fixups.       |
+| `Stacks-on:` | `/pln`, only when the user asks   | File name of a `DONE` plan whose branch this plan continues.     |
 
-`/pln` never writes `Branch:` or `Base:` and never drops them when revising a
-plan that is already in flight. `/impl` and `/oimpl` never write `Repo:`, and
-`/oimpl` writes neither `Base:` nor `Status:` — when it is done the run still
-has not started.
+`/pln` never writes `Branch:` or `Base:` and never drops them, or `Stacks-on:`,
+when revising a plan that is already in flight. `/impl` and `/oimpl` never write
+`Repo:`, and `/oimpl` writes neither `Base:` nor `Status:` — when it is done the
+run still has not started.
 
 One section of the body has the same ownership. **`## Divergences` belongs to
 `/impl`.** It is created on the first divergence, holds one bullet per entry,
@@ -270,7 +272,10 @@ unless `## How to execute plan` exists and satisfies all four list items:
 `Parallel:` gives step groups whose numbers all exist in `## Steps`, or `none`;
 `Checkpoints:` says when to stop; `Verify:` gives a command **and** its
 observable outcome, or the literal `none`. When the plan has a `Branch:` item,
-the checked-out branch must be that branch. A `Team:` missing a role fails and
+the checked-out branch must be that branch. When it has a `Stacks-on:` item and
+no `Branch:` yet, `Resolve-PlanBranch.ps1` — not this gate — enforces, while the
+branch is being chosen, that the owner exists, is `DONE` and has a `Branch:`,
+and that the branch chosen is the owner's. A `Team:` missing a role fails and
 the refusal says which — a plan must never silently become "whatever the model
 felt like".
 

@@ -46,8 +46,9 @@ under the old working-tree convention into that layout.
 `scripts/Get-PlanList.ps1` lists a repository's plans, filtered and ordered,
 with the per-plan counts `/list-plns` reports. `scripts/Resolve-PlanBranch.ps1`
 decides whether a plan lands on its own recorded branch or a fresh one, and
-refuses a branch another plan owns. The skills call them rather than deriving
-paths, and every script has Pester tests beside it.
+refuses a branch another plan owns, except that a plan with `Stacks-on:` naming
+a `DONE` plan continues that plan's branch. The skills call them rather than
+deriving paths, and every script has Pester tests beside it.
 
 ## `/fnsh` shepherds the request to merge
 
