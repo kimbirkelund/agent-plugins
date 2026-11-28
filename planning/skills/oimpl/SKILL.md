@@ -176,6 +176,11 @@ refusal by picking a branch yourself.
 **`existing`** — the plan already has a `Branch:` item, so the work already has
 a home. Use the script's `Branch` and `Path`. Create nothing.
 
+**`stacked`** — the plan's `Stacks-on:` names a `DONE` plan whose branch this
+one continues. Create nothing and invoke no hook. Use the script's `Branch` and
+`Path`, and validate and write `Branch:` as described below. Stacking is asked
+for in the plan's header, never here: the argument only selects the plan.
+
 **`new`** — invoke the user's worktree hook, returned by `Get-PlanContext.ps1`
 as `Worktree`. Derive a short kebab-case slug from the plan's title — lowercased
 and hyphenated, no deliberation — and pass it along with the repository root:
@@ -202,10 +207,10 @@ as the path. If you cannot determine the path, say so and stop before writing
 no branch.
 
 **Once the hook has returned a branch, validate it**: run the script again with
-`-Branch <the branch the hook returned>`. With no hook, the branch is the
-checked-out one (`git branch --show-current`) — validate that the same way.
-Write `Branch:` only when it succeeds. If it throws, report its message verbatim
-and stop.
+`-Branch <the branch the hook returned>`. For `stacked`, validate the returned
+`Branch` the same way. With no hook, the branch is the checked-out one
+(`git branch --show-current`) — validate that the same way. Write `Branch:` only
+when it succeeds. If it throws, report its message verbatim and stop.
 
 ## Opening the session
 

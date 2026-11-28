@@ -98,7 +98,7 @@ BeforeAll {
 
     function New-PlanFile
     {
-        param($Fixture, [string]$Name, [string]$Status = 'PLANNING', [string]$Branch, [string]$Title = 'a plan', [string]$Updated = '2026-09-01', [switch]$ListForm)
+        param($Fixture, [string]$Name, [string]$Status = 'PLANNING', [string]$Branch, [string]$StacksOn, [string]$Title = 'a plan', [string]$Updated = '2026-09-01', [switch]$ListForm)
 
         New-Item -ItemType Directory -Path $Fixture.PlanDir -Force | Out-Null;
         $m = if ($ListForm) { '- ' } else { '' };
@@ -107,6 +107,7 @@ BeforeAll {
         # never got one.
         if ($Updated) { $lines += "${m}Updated: $Updated" }
         if ($Branch) { $lines += "${m}Branch: $Branch" }
+        if ($StacksOn) { $lines += "${m}Stacks-on: $StacksOn" }
         $lines += @('', '## Goal', '', 'something');
         $lines -join "`n" | Set-Content -LiteralPath (Join-Path $Fixture.PlanDir $Name);
     }
@@ -297,6 +298,121 @@ Describe 'Get-PlanContext' {
             $candidate.Status | Should -Be 'DONE';
             $candidate.Branch | Should -Be 'kbi/one';
             $candidate.Updated | Should -Be '2026-09-01';
+        }
+    }
+
+    Context 'stacked plans' {
+
+        It 'exposes StacksOn on every candidate, null when absent' {
+            $f = New-Fixture;
+            New-PlanFile $f -Name '2026-09-01-base.md' -Status 'DONE' -Branch 'kbi/feature';
+            New-PlanFile $f -Name '2026-09-02-top.md' -Status 'PLANNING' -StacksOn '2026-09-01-base.md' -ListForm;
+
+            $candidates = @((Invoke-Context $f).Candidates);
+
+            ($candidates | Where-Object Name -EQ '2026-09-02-top.md').StacksOn | Should -Be '2026-09-01-base.md';
+            ($candidates | Where-Object Name -EQ '2026-09-01-base.md').StacksOn | Should -BeNullOrEmpty;
+        }
+
+        It 'resolves a stacked plan with no Branch line to itself on the owner branch' {
+            $f = New-Fixture -NoOrigin -Branch 'kbi/feature';
+            New-PlanFile $f -Name '2026-09-01-base.md' -Status 'DONE' -Branch 'kbi/feature';
+            New-PlanFile $f -Name '2026-09-02-top.md' -Status 'PLANNING' -StacksOn '2026-09-01-base.md';
+
+            $context = Invoke-Context $f;
+
+            $context.PlanMatch | Should -Be 'branch';
+            Split-Path $context.PlanPath -Leaf | Should -Be '2026-09-02-top.md';
+        }
+
+        It 'prefers the stacked plan when both carry the branch and it is IMPLEMENTING' {
+            $f = New-Fixture -NoOrigin -Branch 'kbi/feature';
+            New-PlanFile $f -Name '2026-09-01-base.md' -Status 'DONE' -Branch 'kbi/feature';
+            New-PlanFile $f -Name '2026-09-02-top.md' -Status 'IMPLEMENTING' -Branch 'kbi/feature' -StacksOn '2026-09-01-base.md';
+
+            $context = Invoke-Context $f;
+
+            $context.PlanMatch | Should -Be 'branch';
+            Split-Path $context.PlanPath -Leaf | Should -Be '2026-09-02-top.md';
+        }
+
+        It 'prefers the stacked plan when both are DONE' {
+            $f = New-Fixture -NoOrigin -Branch 'kbi/feature';
+            New-PlanFile $f -Name '2026-09-01-base.md' -Status 'DONE' -Branch 'kbi/feature';
+            New-PlanFile $f -Name '2026-09-02-top.md' -Status 'DONE' -Branch 'kbi/feature' -StacksOn '2026-09-01-base.md';
+
+            $context = Invoke-Context $f;
+
+            $context.PlanMatch | Should -Be 'branch';
+            Split-Path $context.PlanPath -Leaf | Should -Be '2026-09-02-top.md';
+        }
+
+        It 'does not match a stacked plan whose owner is on a different branch' {
+            $f = New-Fixture -NoOrigin -Branch 'kbi/feature';
+            New-PlanFile $f -Name '2026-09-01-base.md' -Status 'DONE' -Branch 'kbi/other';
+            New-PlanFile $f -Name '2026-09-02-top.md' -Status 'DONE' -StacksOn '2026-09-01-base.md';
+
+            $context = Invoke-Context $f;
+
+            $context.PlanMatch | Should -Be 'none';
+            $context.PlanPath | Should -BeNullOrEmpty;
+        }
+
+        It 'resolves a three-plan chain to the top' {
+            $f = New-Fixture -NoOrigin -Branch 'kbi/feature';
+            New-PlanFile $f -Name '2026-09-01-base.md' -Status 'DONE' -Branch 'kbi/feature';
+            New-PlanFile $f -Name '2026-09-02-middle.md' -Status 'DONE' -StacksOn '2026-09-01-base.md';
+            New-PlanFile $f -Name '2026-09-03-top.md' -Status 'PLANNING' -StacksOn '2026-09-02-middle.md';
+
+            $context = Invoke-Context $f;
+
+            $context.PlanMatch | Should -Be 'branch';
+            Split-Path $context.PlanPath -Leaf | Should -Be '2026-09-03-top.md';
+        }
+
+        It 'compares the Stacks-on file name case-insensitively' {
+            $f = New-Fixture -NoOrigin -Branch 'kbi/feature';
+            New-PlanFile $f -Name '2026-09-01-Base.md' -Status 'DONE' -Branch 'kbi/feature';
+            New-PlanFile $f -Name '2026-09-02-top.md' -Status 'PLANNING' -StacksOn '2026-09-01-BASE.MD';
+
+            $context = Invoke-Context $f;
+
+            $context.PlanMatch | Should -Be 'branch';
+            Split-Path $context.PlanPath -Leaf | Should -Be '2026-09-02-top.md';
+        }
+
+        It 'stays ambiguous for two plans sharing a branch with no Stacks-on' {
+            $f = New-Fixture -NoOrigin -Branch 'kbi/feature';
+            New-PlanFile $f -Name '2026-09-01-one.md' -Status 'DONE' -Branch 'kbi/feature';
+            New-PlanFile $f -Name '2026-09-02-two.md' -Status 'DONE' -Branch 'kbi/feature';
+
+            $context = Invoke-Context $f;
+
+            $context.PlanMatch | Should -Be 'ambiguous';
+            $context.PlanPath | Should -BeNullOrEmpty;
+        }
+
+        It 'is ambiguous when two plans stack on the same owner' {
+            $f = New-Fixture -NoOrigin -Branch 'kbi/feature';
+            New-PlanFile $f -Name '2026-09-01-base.md' -Status 'DONE' -Branch 'kbi/feature';
+            New-PlanFile $f -Name '2026-09-02-left.md' -Status 'PLANNING' -StacksOn '2026-09-01-base.md';
+            New-PlanFile $f -Name '2026-09-03-right.md' -Status 'PLANNING' -StacksOn '2026-09-01-base.md';
+
+            $context = Invoke-Context $f;
+
+            $context.PlanMatch | Should -Be 'ambiguous';
+            $context.PlanPath | Should -BeNullOrEmpty;
+        }
+
+        It 'still lets -Plan win over the stack' {
+            $f = New-Fixture -NoOrigin -Branch 'kbi/feature';
+            New-PlanFile $f -Name '2026-09-01-base.md' -Status 'DONE' -Branch 'kbi/feature';
+            New-PlanFile $f -Name '2026-09-02-top.md' -Status 'PLANNING' -StacksOn '2026-09-01-base.md';
+
+            $context = Invoke-Context $f @{ Plan = '2026-09-01-base' };
+
+            $context.PlanMatch | Should -Be 'selected';
+            Split-Path $context.PlanPath -Leaf | Should -Be '2026-09-01-base.md';
         }
     }
 

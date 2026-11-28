@@ -18,7 +18,9 @@
          only-active rules are skipped entirely, because an explicit choice beats every
          heuristic;
       2. the plan whose `Branch:` line matches the checked-out branch — exact, and the
-         case /impl hits when it resumes in the worktree it created;
+         case /impl hits when it resumes in the worktree it created. A plan whose
+         `Stacks-on:` line names a plan on that branch counts too, and when several plans
+         match, the one no other match stacks on wins;
       3. otherwise the single plan with Status PLANNING or IMPLEMENTING;
       4. otherwise nothing, with every candidate returned so the caller can ask.
 
@@ -216,24 +218,26 @@ function Get-PlanHeader([string]$PlanPath)
     # Header fields sit in the first few lines; a plan is a page and this runs on every
     # candidate, so read the top rather than the whole file.
     $lines = Get-Content -LiteralPath $PlanPath -TotalCount 20;
-    $title = $null; $status = $null; $branch = $null; $updated = $null;
+    $title = $null; $status = $null; $branch = $null; $updated = $null; $stacksOn = $null;
 
     foreach ($line in $lines)
     {
         if (-not $title -and $line -match '^#\s*Plan:\s*(.+?)\s*$') { $title = $Matches[1]; continue }
         if (-not $status -and $line -match '^(?:[-*+]\s+)?Status:\s*(\S+)') { $status = $Matches[1]; continue }
         if (-not $branch -and $line -match '^(?:[-*+]\s+)?Branch:\s*(\S+)') { $branch = $Matches[1]; continue }
+        if (-not $stacksOn -and $line -match '^(?:[-*+]\s+)?Stacks-on:\s*(\S+)') { $stacksOn = $Matches[1]; continue }
         if (-not $updated -and $line -match '^(?:[-*+]\s+)?Updated:\s*(\S+)') { $updated = $Matches[1]; continue }
     }
 
     return [pscustomobject]@{
-        Path    = $PlanPath
-        Name    = Split-Path $PlanPath -Leaf
-        Title   = $title
-        Status  = $status
-        Branch  = $branch
-        Updated = $updated
-        Key     = $null
+        Path     = $PlanPath
+        Name     = Split-Path $PlanPath -Leaf
+        Title    = $title
+        Status   = $status
+        Branch   = $branch
+        StacksOn = $stacksOn
+        Updated  = $updated
+        Key      = $null
     }
 }
 
@@ -353,7 +357,36 @@ if (-not [string]::IsNullOrWhiteSpace($Plan))
 }
 else
 {
-    $byBranch = @($candidates | Where-Object { $branch -and $_.Branch -eq $branch });
+    # A plan stacked on the branch's owner, directly or through other stacked plans, counts
+    # as on the branch even without a `Branch:` line of its own. Of the matches, only the
+    # top of the stack is kept: any plan another match stacks on is dropped.
+    $ignoreCase = [System.StringComparison]::OrdinalIgnoreCase;
+    $byName = @{};
+    foreach ($candidate in $candidates) { $byName[$candidate.Name.ToLowerInvariant()] = $candidate }
+
+    $byBranch = @();
+    if ($branch)
+    {
+        foreach ($candidate in $candidates)
+        {
+            $current = $candidate;
+            $seen = @{};
+            while ($current -and -not $seen.ContainsKey($current.Name))
+            {
+                if ($current.Branch -eq $branch) { $byBranch += $candidate; break }
+
+                if ($current.Branch -or -not $current.StacksOn) { break }
+
+                $seen[$current.Name] = $true;
+                $current = $byName[$current.StacksOn.ToLowerInvariant()];
+            }
+        }
+
+        $byBranch = @($byBranch | Where-Object {
+                $name = $_.Name;
+                -not ($byBranch | Where-Object { $_.StacksOn -and $_.StacksOn.Equals($name, $ignoreCase) });
+            });
+    }
     $active = @($candidates | Where-Object { $_.Status -in @('PLANNING', 'IMPLEMENTING') });
 
     if ($byBranch.Count -eq 1)

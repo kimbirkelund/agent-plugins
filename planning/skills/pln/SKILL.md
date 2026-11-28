@@ -336,6 +336,13 @@ roll-up rebases against. Never write either yourself — you are planning on the
 default branch and there is no branch yet — and never drop them when revising a
 plan that is already in flight.
 
+A third line, `Stacks-on:`, is yours to write, and only on the user's explicit
+request to stack this plan on the branch of a named `DONE` plan. Its value is
+that plan's file name, taken from what the user named; never infer it from topic
+overlap or from which plans exist. `/impl` and `/oimpl` then continue the
+owner's branch instead of making a fresh one. Preserve it on every later
+revision, as you do `Branch:` and `Base:`.
+
 ## The `## How to execute plan` section
 
 This section is the contract with `/impl`, which refuses to start without it. It

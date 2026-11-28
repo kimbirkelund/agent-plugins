@@ -51,11 +51,12 @@ BeforeAll {
         }
     }
 
-    function Write-Plan($Fixture, [string]$Name, [string]$Title, [string]$Branch, [string]$Status = 'PLANNING', [switch]$ListForm)
+    function Write-Plan($Fixture, [string]$Name, [string]$Title, [string]$Branch, [string]$Status = 'PLANNING', [switch]$ListForm, [string]$StacksOn)
     {
         $m = if ($ListForm) { '- ' } else { '' };
         $lines = @("# Plan: $Title", '', "${m}Status: $Status");
         if ($Branch) { $lines += "${m}Branch: $Branch" }
+        if ($StacksOn) { $lines += "${m}Stacks-on: $StacksOn" }
         $path = Join-Path $Fixture.PlanDir $Name;
         $lines | Set-Content -LiteralPath $path;
         return (Resolve-Path -LiteralPath $path).Path;
@@ -183,6 +184,135 @@ Describe 'Resolve-PlanBranch' {
             $plan = Write-Plan $script:Fx 'a.md' 'Alpha' 'mine';
 
             { Invoke-Resolve $script:Fx $plan 'fresh' } | Should -Throw '*a.md*already names branch*mine*';
+        }
+    }
+
+    Context 'stacked plans' {
+        It 'reports stacked with the repo root when the owner branch is checked out in place' {
+            git -C $script:Fx.RepoRoot switch --quiet -c feat;
+            Write-Plan $script:Fx 'base.md' 'Base' 'feat' 'DONE' | Out-Null;
+            $plan = Write-Plan $script:Fx 'top.md' 'Top' $null -StacksOn 'base.md';
+
+            $r = Invoke-Resolve $script:Fx $plan;
+
+            $r.Mode | Should -Be 'stacked';
+            $r.Branch | Should -Be 'feat';
+            $r.Path | Should -Be $script:Fx.RepoRoot;
+        }
+
+        It 'reports stacked with the worktree path when the owner branch is in a worktree' {
+            $wt = Join-Path $script:Fx.Base 'feat-wt';
+            git -C $script:Fx.RepoRoot worktree add --quiet -b feat $wt;
+            Write-Plan $script:Fx 'base.md' 'Base' 'feat' 'DONE' | Out-Null;
+            $plan = Write-Plan $script:Fx 'top.md' 'Top' $null -StacksOn 'base.md';
+
+            $r = Invoke-Resolve $script:Fx $plan;
+
+            $r.Mode | Should -Be 'stacked';
+            (Resolve-Path -LiteralPath $r.Path).Path | Should -Be (Resolve-Path -LiteralPath $wt).Path;
+        }
+
+        It 'reports stacked with the repo root when the owner branch is checked out nowhere' {
+            git -C $script:Fx.RepoRoot branch feat;
+            Write-Plan $script:Fx 'base.md' 'Base' 'feat' 'DONE' | Out-Null;
+            $plan = Write-Plan $script:Fx 'top.md' 'Top' $null -StacksOn 'base.md';
+
+            $r = Invoke-Resolve $script:Fx $plan;
+
+            $r.Mode | Should -Be 'stacked';
+            $r.Branch | Should -Be 'feat';
+            $r.Path | Should -Be $script:Fx.RepoRoot;
+        }
+
+        It 'throws when the owner plan is missing' {
+            $plan = Write-Plan $script:Fx 'top.md' 'Top' $null -StacksOn 'gone.md';
+
+            { Invoke-Resolve $script:Fx $plan } | Should -Throw '*gone.md*';
+        }
+
+        It 'throws when the owner is not DONE' {
+            git -C $script:Fx.RepoRoot branch feat;
+            Write-Plan $script:Fx 'base.md' 'Base' 'feat' 'PLANNING' | Out-Null;
+            $plan = Write-Plan $script:Fx 'top.md' 'Top' $null -StacksOn 'base.md';
+
+            { Invoke-Resolve $script:Fx $plan } | Should -Throw '*base.md*PLANNING*';
+        }
+
+        It 'throws when the owner has no Branch line' {
+            Write-Plan $script:Fx 'base.md' 'Base' $null 'DONE' | Out-Null;
+            $plan = Write-Plan $script:Fx 'top.md' 'Top' $null -StacksOn 'base.md';
+
+            { Invoke-Resolve $script:Fx $plan } | Should -Throw '*base.md*no Branch*';
+        }
+
+        It 'throws when the owner branch does not exist in git' {
+            Write-Plan $script:Fx 'base.md' 'Base' 'ghost' 'DONE' | Out-Null;
+            $plan = Write-Plan $script:Fx 'top.md' 'Top' $null -StacksOn 'base.md';
+
+            { Invoke-Resolve $script:Fx $plan } | Should -Throw '*ghost*does not exist*';
+        }
+
+        It 'accepts -Branch equal to the owner branch' {
+            Write-Plan $script:Fx 'base.md' 'Base' 'feat' 'DONE' | Out-Null;
+            $plan = Write-Plan $script:Fx 'top.md' 'Top' $null -StacksOn 'base.md';
+
+            $r = Invoke-Resolve $script:Fx $plan 'feat';
+
+            $r.Mode | Should -Be 'new';
+            $r.Branch | Should -Be 'feat';
+        }
+
+        It 'throws when -Branch differs from the owner branch' {
+            Write-Plan $script:Fx 'base.md' 'Base' 'feat' 'DONE' | Out-Null;
+            $plan = Write-Plan $script:Fx 'top.md' 'Top' $null -StacksOn 'base.md';
+
+            { Invoke-Resolve $script:Fx $plan 'other' } | Should -Throw '*feat*other*';
+        }
+
+        It 'ignores a third DONE plan on the branch' {
+            git -C $script:Fx.RepoRoot branch feat;
+            Write-Plan $script:Fx 'base.md' 'Base' 'feat' 'DONE' | Out-Null;
+            Write-Plan $script:Fx 'mid.md' 'Mid' 'feat' 'DONE' | Out-Null;
+            $plan = Write-Plan $script:Fx 'top.md' 'Top' 'feat' -StacksOn 'base.md';
+
+            (Invoke-Resolve $script:Fx $plan).Mode | Should -Be 'existing';
+        }
+
+        It 'throws when a third plan that is not DONE names the branch' {
+            git -C $script:Fx.RepoRoot branch feat;
+            Write-Plan $script:Fx 'base.md' 'Base' 'feat' 'DONE' | Out-Null;
+            Write-Plan $script:Fx 'rival.md' 'Rival' 'feat' 'PLANNING' | Out-Null;
+            $plan = Write-Plan $script:Fx 'top.md' 'Top' 'feat' -StacksOn 'base.md';
+
+            { Invoke-Resolve $script:Fx $plan } | Should -Throw '*top.md*feat*rival.md*';
+        }
+
+        It 'throws on a third plan that is not DONE when choosing the owner branch' {
+            Write-Plan $script:Fx 'base.md' 'Base' 'feat' 'DONE' | Out-Null;
+            Write-Plan $script:Fx 'rival.md' 'Rival' 'feat' 'PLANNING' | Out-Null;
+            $plan = Write-Plan $script:Fx 'top.md' 'Top' $null -StacksOn 'base.md';
+
+            { Invoke-Resolve $script:Fx $plan 'feat' } | Should -Throw '*rival.md*';
+        }
+
+        It 'restarts a stacked plan that already has a Branch line as existing' {
+            git -C $script:Fx.RepoRoot switch --quiet -c feat;
+            Write-Plan $script:Fx 'base.md' 'Base' 'feat' 'DONE' | Out-Null;
+            $plan = Write-Plan $script:Fx 'top.md' 'Top' 'feat' 'IMPLEMENTING' -StacksOn 'base.md';
+
+            $r = Invoke-Resolve $script:Fx $plan;
+
+            $r.Mode | Should -Be 'existing';
+            $r.Path | Should -Be $script:Fx.RepoRoot;
+        }
+
+        It 'keeps refusing a DONE rival for a plan without Stacks-on' {
+            git -C $script:Fx.RepoRoot branch feat;
+            Write-Plan $script:Fx 'base.md' 'Base' 'feat' 'DONE' | Out-Null;
+            $plan = Write-Plan $script:Fx 'top.md' 'Top' 'feat';
+
+            { Invoke-Resolve $script:Fx $plan } | Should -Throw '*top.md*feat*base.md*';
+            { Invoke-Resolve $script:Fx (Write-Plan $script:Fx 'new.md' 'New' $null) 'feat' } | Should -Throw '*base.md*';
         }
     }
 
