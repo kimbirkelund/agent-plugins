@@ -16,6 +16,13 @@
     Mode `existing` with the branch and the path of the work tree it is checked out in,
     or -RepoRoot when no work tree has it checked out.
 
+    A `Stacks-on:` line names a DONE plan, by file name, whose branch this plan continues
+    on. The owner must exist, be DONE and have a `Branch:` line, or the script throws. For
+    this plan DONE plans no longer count as rivals for a branch. With no `Branch:` line of
+    its own and no -Branch the answer is Mode `stacked` with the owner's branch and work
+    tree path, resolved as for `existing`; with -Branch it must be the owner's branch.
+    Once the plan carries a `Branch:` line it is `existing` again.
+
     With -Branch the caller has chosen a branch for a plan that has none. The plan must
     still have none, and no other plan may already name the branch. The answer is Mode
     `new` with the branch.
@@ -32,7 +39,7 @@
     Branch the caller proposes for a plan that has no `Branch:` line.
 
 .OUTPUTS
-    One JSON object on stdout: Mode (`new` or `existing`), Branch, Path.
+    One JSON object on stdout: Mode (`new`, `existing` or `stacked`), Branch, Path.
 
 .EXAMPLE
     pwsh -File Resolve-PlanBranch.ps1 -Plan ~/code/plans/repo/2026-01-01-thing.md
@@ -73,9 +80,11 @@ function Write-Result([string]$Mode, [string]$ResultBranch, [string]$ResultPath)
 
 # Same header read as Get-PlanContext.ps1: the top of the file, first `Branch:` line (bare or list item).
 $planBranch = $null;
+$stacksOn = $null;
 foreach ($line in (Get-Content -LiteralPath $planPath -TotalCount 20))
 {
-    if ($line -match '^(?:[-*+]\s+)?Branch:\s*(\S+)') { $planBranch = $Matches[1]; break }
+    if (-not $planBranch -and $line -match '^(?:[-*+]\s+)?Branch:\s*(\S+)') { $planBranch = $Matches[1] }
+    elseif (-not $stacksOn -and $line -match '^(?:[-*+]\s+)?Stacks-on:\s*(\S+)') { $stacksOn = $Matches[1] }
 }
 
 $context = & (Join-Path $PSScriptRoot 'Get-PlanContext.ps1') -Path $repoRootPath | ConvertFrom-Json;
@@ -84,11 +93,61 @@ $context = & (Join-Path $PSScriptRoot 'Get-PlanContext.ps1') -Path $repoRootPath
 $planName = Split-Path $planPath -Leaf;
 $others = @(@($context.Candidates) | Where-Object { $_.Name -ine $planName });
 
+# A plan that stacks on a finished plan shares that plan's branch, so for this plan alone
+# DONE plans are not rivals for a branch. The owner must be there, finished, and have a
+# branch to share.
+$ownerBranch = $null;
+if ($stacksOn)
+{
+    $owner = @(@($context.Candidates) | Where-Object { $_.Name -ieq $stacksOn }) | Select-Object -First 1;
+    if (-not $owner)
+    {
+        throw "Plan '$planPath' stacks on '$stacksOn', which is not a plan of this repository.";
+    }
+    if ($owner.Status -ne 'DONE')
+    {
+        throw "Plan '$planPath' stacks on '$stacksOn', which is $($owner.Status) rather than DONE.";
+    }
+    if (-not $owner.Branch)
+    {
+        throw "Plan '$planPath' stacks on '$stacksOn', which has no Branch line.";
+    }
+
+    $ownerBranch = $owner.Branch;
+    $others = @($others | Where-Object { $_.Status -ne 'DONE' });
+}
+
+function Get-BranchWorktree([string]$Name)
+{
+    $worktree = $null;
+    $current = $null;
+    foreach ($line in @(git -C $repoRootPath worktree list --porcelain))
+    {
+        if ($line -match '^worktree (.+)$') { $current = $Matches[1] }
+        elseif ($line -eq "branch refs/heads/$Name") { $worktree = $current; break }
+    }
+
+    if ($worktree) { return $worktree }
+    return $repoRootPath;
+}
+
 # Plan lines are parsed as a single token, so a caller's value gets the same shape.
 if ($Branch) { $Branch = ($Branch.Trim() -replace '^refs/heads/', '') }
 
 if (-not $Branch)
 {
+    if (-not $planBranch -and $ownerBranch)
+    {
+        git -C $repoRootPath rev-parse --verify --quiet "refs/heads/$ownerBranch" *> $null;
+        if ($LASTEXITCODE -ne 0)
+        {
+            throw "Plan '$planPath' stacks on '$stacksOn', whose branch '$ownerBranch' does not exist.";
+        }
+
+        Write-Result 'stacked' $ownerBranch (Get-BranchWorktree $ownerBranch);
+        return;
+    }
+
     if (-not $planBranch)
     {
         Write-Result 'new' $null $null;
@@ -107,23 +166,18 @@ if (-not $Branch)
         throw "Plan '$planPath' names branch '$planBranch', which does not exist.";
     }
 
-    $worktree = $null;
-    $current = $null;
-    foreach ($line in @(git -C $repoRootPath worktree list --porcelain))
-    {
-        if ($line -match '^worktree (.+)$') { $current = $Matches[1] }
-        elseif ($line -eq "branch refs/heads/$planBranch") { $worktree = $current; break }
-    }
-
-    if (-not $worktree) { $worktree = $repoRootPath }
-
-    Write-Result 'existing' $planBranch $worktree;
+    Write-Result 'existing' $planBranch (Get-BranchWorktree $planBranch);
     return;
 }
 
 if ($planBranch)
 {
     throw "Plan '$planPath' already names branch '$planBranch'; the hook should not have been invoked.";
+}
+
+if ($ownerBranch -and $Branch -ne $ownerBranch)
+{
+    throw "Plan '$planPath' stacks on '$stacksOn', so it must use branch '$ownerBranch', not '$Branch'.";
 }
 
 $taken = @($others | Where-Object { $_.Branch -eq $Branch }) | Select-Object -First 1;
